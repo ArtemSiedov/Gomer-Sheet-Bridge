@@ -1,32 +1,32 @@
-# Політика конфіденційності
+# Privacy Policy
 ## Gomer Sheet Bridge
 
-Останнє оновлення: 2026-02-09
+Last updated: 2026-02-09
 
-`Gomer Sheet Bridge` не продає і не передає персональні дані третім сторонам.
+`Gomer Sheet Bridge` does not sell or share personal data with third parties.
 
-### 1. Які дані обробляє розширення
-- URL таблиці Google Sheets, який користувач вводить у popup.
-- Технічні дані зі сторінок Gomer для експорту:
-категорія, атрибут, значення параметра, номер задачі, посилання на товар.
-- Токен доступу Google OAuth, який надається через Chrome Identity API для запису в Google Sheets від імені користувача.
+### 1. Data Processed by the Extension
+- Google Sheets URL entered by the user in the popup.
+- Technical data from Gomer pages for export:
+category, attribute, parameter value, task number, and product link.
+- Google OAuth access token provided via Chrome Identity API to write to Google Sheets on behalf of the user.
 
-### 2. Для чого ці дані використовуються
-Дані використовуються лише для виконання основної функції розширення:
-експорту даних із Gomer у Google Sheets користувача.
+### 2. Purpose of Processing
+Data is used only for the core function of the extension:
+exporting data from Gomer to the user's Google Sheets.
 
-### 3. Зберігання даних
-- Налаштування (наприклад, URL таблиці) зберігаються у `chrome.storage.sync`.
-- Розширення не створює окрему зовнішню базу даних користувачів.
+### 3. Data Storage
+- Settings (for example, the Google Sheet URL) are stored in `chrome.storage.sync`.
+- The extension does not maintain a separate external user database.
 
-### 4. Передача даних
-- Дані передаються лише до Google Sheets API та тільки в межах дій користувача.
-- Дані не використовуються для реклами, профілювання або продажу.
+### 4. Data Sharing
+- Data is sent only to Google Sheets API and only as part of user actions.
+- Data is not used for advertising, profiling, or resale.
 
-### 5. Контроль користувача
-- Користувач може видалити розширення та очистити дані браузера/`chrome.storage`.
-- Користувач може відкликати доступ у налаштуваннях Google Account (доступи сторонніх застосунків).
+### 5. User Control
+- Users can remove the extension and clear browser/`chrome.storage` data.
+- Users can revoke access in Google Account settings (third-party app access).
 
-### 6. Контакти
-- Власник розширення: Artem Siedov
-- Контактний email: додайте ваш email перед публікацією
+### 6. Contact
+- Extension owner: Artem Siedov
+- Contact email: add your support email before publishing
