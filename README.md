@@ -61,7 +61,6 @@ openssl rsa -in extension.pem -pubout -outform DER | openssl base64 -A
 ### Важно
 - Если `extension.pem` или `manifest.json -> key` поменяются, изменится `Extension ID`.
 - После смены ID обнови OAuth-настройки в Google Cloud (разрешенный ID расширения).
-- `extension.pem` должен быть только локально; в репозиторий его не добавляем.
 
 ## Настройка Google Cloud
 1. Создай или открой проект в Google Cloud.
