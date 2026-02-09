@@ -95,3 +95,8 @@ openssl rsa -in extension.pem -pubout -outform DER | openssl base64 -A
 - Поиск в прайсе чувствителен к имени параметра и значению после нормализации.
 - Если у источника `Api virtual source` или `javascript:void(0)`, товарный URL не строится.
 - Для стабильного `Extension ID` локально используется `extension.pem`.
+
+## Privacy Policy
+- Markdown-версия: `PRIVACY.md`
+- HTML-версия для публикации: `privacy-policy.html`
+- Для Chrome Web Store укажи публичный URL на `privacy-policy.html` (например, через GitHub Pages).

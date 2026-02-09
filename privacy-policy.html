@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Privacy Policy - Gomer Sheet Bridge</title>
+    <style>
+      :root {
+        --bg: #f6f8fb;
+        --card: #ffffff;
+        --text: #1f2937;
+        --muted: #6b7280;
+        --line: #dbe3ee;
+        --accent: #0e7a46;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      main {
+        max-width: 860px;
+        margin: 32px auto;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 28px 24px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+      h2 {
+        margin-top: 28px;
+        font-size: 20px;
+      }
+      p, li {
+        line-height: 1.6;
+      }
+      .meta {
+        color: var(--muted);
+        margin: 0 0 20px;
+      }
+      .brand {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      ul {
+        margin: 10px 0 0 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Політика конфіденційності</h1>
+      <p class="meta">Gomer Sheet Bridge • Останнє оновлення: 2026-02-09</p>
+
+      <p><span class="brand">Gomer Sheet Bridge</span> не продає і не передає персональні дані третім сторонам.</p>
+
+      <h2>1. Які дані обробляє розширення</h2>
+      <ul>
+        <li>URL таблиці Google Sheets, який користувач вводить у popup.</li>
+        <li>Технічні дані зі сторінок Gomer для експорту: категорія, атрибут, значення параметра, номер задачі, посилання на товар.</li>
+        <li>Токен доступу Google OAuth через Chrome Identity API для запису в Google Sheets від імені користувача.</li>
+      </ul>
+
+      <h2>2. Для чого ці дані використовуються</h2>
+      <p>Дані використовуються лише для виконання основної функції розширення: експорту даних із Gomer у Google Sheets користувача.</p>
+
+      <h2>3. Зберігання даних</h2>
+      <ul>
+        <li>Налаштування (наприклад, URL таблиці) зберігаються у <code>chrome.storage.sync</code>.</li>
+        <li>Розширення не створює окрему зовнішню базу даних користувачів.</li>
+      </ul>
+
+      <h2>4. Передача даних</h2>
+      <ul>
+        <li>Дані передаються лише до Google Sheets API та тільки в межах дій користувача.</li>
+        <li>Дані не використовуються для реклами, профілювання або продажу.</li>
+      </ul>
+
+      <h2>5. Контроль користувача</h2>
+      <ul>
+        <li>Користувач може видалити розширення та очистити дані браузера / <code>chrome.storage</code>.</li>
+        <li>Користувач може відкликати доступ у налаштуваннях Google Account.</li>
+      </ul>
+
+      <h2>6. Контакти</h2>
+      <p>
+        Власник розширення: Artem Siedov<br />
+        Контактний email: додайте ваш email перед публікацією
+      </p>
+    </main>
+  </body>
+</html>
