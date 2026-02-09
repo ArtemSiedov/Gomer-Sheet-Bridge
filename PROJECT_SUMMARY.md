@@ -24,7 +24,7 @@ Chrome extension that collects product parameters on Gomer pages, finds matching
 - **Price availability handling**:
   - If price link is `javascript:void(0)` or `title="Api virtual source"` → shows “Прайс недоступен” and still writes row (without product link).
 
-## Current Structure (params/)
+## Current Structure (Gomer Sheet Bridge/)
 - `manifest.json` — MV3 manifest, permissions, background service worker.
 - `src/content/content.js` — UI injection, DOM parsing, binding-page flow, messaging to background.
 - `src/background/background.js` — Sheets API, price feed parsing, matching logic.

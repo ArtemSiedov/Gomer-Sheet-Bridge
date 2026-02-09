@@ -36,7 +36,7 @@ OAuth (Chrome Identity), поиск офферов в XML, запись и фо�
 2. Включи `Developer mode`.
 3. Нажми `Load unpacked`.
 4. Выбери папку:
-`params/`.
+`Gomer Sheet Bridge/`.
 5. Скопируй `Extension ID` (нужен для OAuth в Google Cloud).
 
 ## Как получить `extension.pem` (стабильный Extension ID)
@@ -45,14 +45,14 @@ OAuth (Chrome Identity), поиск офферов в XML, запись и фо�
 ### Вариант 1: через Chrome (рекомендуется)
 1. Открой `chrome://extensions`.
 2. Нажми `Pack extension`.
-3. В `Extension root directory` укажи папку проекта `params/`.
+3. В `Extension root directory` укажи папку проекта `Gomer Sheet Bridge/`.
 4. Поле `Private key file` оставь пустым при первой генерации.
 5. Chrome создаст `.pem` и `.crx`.
 6. Положи `.pem` в корень проекта как `extension.pem` и не коммить его в Git.
 
 ### Вариант 2: через `openssl`
 ```bash
-cd /Users/artem/Rozetka/Params/params
+cd "/Users/artem/Rozetka/Params/Gomer Sheet Bridge"
 openssl genrsa -out extension.pem 2048
 openssl rsa -in extension.pem -pubout -outform DER | openssl base64 -A
 ```
