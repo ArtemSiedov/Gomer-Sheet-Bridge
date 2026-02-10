@@ -1433,6 +1433,51 @@ function addButtonsToBlocks() {
   rows.forEach((row) => createBlockButton(row));
 }
 
+function extractBindingValueFromRow(row) {
+  if (!row) return "";
+  const td = row.querySelector("td:nth-child(2)");
+  if (!td) return "";
+
+  const strictEl = td.querySelector("div > div");
+  const strictRaw = strictEl ? (strictEl.value || strictEl.textContent || strictEl.getAttribute("value") || "") : "";
+  const strictValue = extractRuValue(strictRaw);
+  if (String(strictValue || "").trim()) return String(strictValue).trim();
+
+  const tdTextRaw = td.innerText || td.textContent || "";
+  const tdText = String(tdTextRaw || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)[0] || "";
+  const parsed = extractRuValue(tdText);
+  return String(parsed || "").trim();
+}
+
+function getBindingSelectedRows() {
+  const tbody = document.querySelector(
+    "#gomer-app > div > div.p-datatable.p-component.p-datatable-responsive-scroll.p-datatable-gridlines > div.p-datatable-wrapper > table > tbody"
+  );
+  if (!tbody) return [];
+  const rows = Array.from(tbody.querySelectorAll("tr"));
+  const checkedRows = rows.filter((row) => Boolean(row.querySelector('input[type="checkbox"]:checked')));
+  if (checkedRows.length) return checkedRows;
+  return rows.filter((row) => row.classList.contains("p-highlight"));
+}
+
+function getBindingSelectedValues(fallbackValue) {
+  const selectedRows = getBindingSelectedRows();
+  if (!selectedRows.length) {
+    return fallbackValue ? [fallbackValue] : [];
+  }
+  const values = selectedRows
+    .map((row) => extractBindingValueFromRow(row))
+    .map((v) => String(v || "").trim())
+    .filter(Boolean);
+  const unique = Array.from(new Set(values));
+  if (!unique.length && fallbackValue) return [fallbackValue];
+  console.log("[RW] binding selected values:", "rows=", selectedRows.length, "unique=", unique.length, "values=", unique);
+  return unique;
+}
+
 function createTableButton(cell) {
   if (cell.querySelector(".rw-sheets-btn")) {
     return;
@@ -1485,15 +1530,21 @@ function createTableButton(cell) {
     const value = extractRuValue(rawValue);
     console.log("[RW] createTableButton: rawValue=", JSON.stringify(rawValue), "value=", JSON.stringify(value));
     
-    // Проверяем, есть ли выделенный текст в ячейке значения
+    const isBindingPage = window.location.href.includes("/gomer/sellers/attributes/binding-attribute-page/source/");
+    // Для binding-page: если есть выделенные строки p-highlight, берем все их значения.
+    // Иначе работаем как раньше по текущей строке.
     const selectedValue = getSelectedTextFromInput(valueEl);
-    // Для записи в файл и ссылки используем выделенный текст, если есть, иначе все значение
-    const valueForFile = selectedValue || value;
-    // Для поиска в прайсе всегда используем все значение (lowercase)
-    const valueForPrice = (value || "").toLowerCase();
+    const fallbackValueForFile = selectedValue || value;
+    const valuesForExport = isBindingPage
+      ? getBindingSelectedValues(fallbackValueForFile)
+      : (fallbackValueForFile ? [fallbackValueForFile] : []);
 
     if (!category && !attribute && !value) {
       showToast("Пустые значения — нечего добавлять", btn, "error");
+      return;
+    }
+    if (!valuesForExport.length) {
+      showToast("Нет выбранных значений для добавления", btn, "error");
       return;
     }
 
@@ -1510,9 +1561,6 @@ function createTableButton(cell) {
 
       try {
         const timestamp = new Date().toLocaleString("ru-RU");
-        const links = buildValueWithLink(valueForFile);
-        const valueLink = typeof links === "string" ? links : links.valueLink;
-        const productLink = typeof links === "string" ? "" : links.productLink;
         let taskIdForFields = normalizeTaskId(data[BINDING_TASK_ID_KEY]);
         const customTaskId = normalizeTaskId(data[SETTINGS_CUSTOM_TASK_ID_KEY]);
         const useTaskIdForOfferSelection = resolveUseTaskFilter(data[SETTINGS_USE_TASK_FILTER_KEY]);
@@ -1547,33 +1595,57 @@ function createTableButton(cell) {
         }
         const { priceUrl, priceLinkTitle } = getPriceLinkMeta(sourceId);
         const sourceType = await resolveSourceTypeForQueue();
-
-        const fields = {
-          "Дата добавления": timestamp,
-          "Категория товара": category,
-          "Атрибут": attribute,
-          "Значение параметра": valueLink,
-          "Номер задачи": taskIdForFields,
-          "Ссылка на товар": productLink
-        };
-        await enqueueExportTask({
-          sheetUrl: data.sheetUrl,
-          sourceId,
-          sourceType,
-          sourceOrigin: window.location.origin,
-          categoryIdForOnModeration: finalCategoryId || "",
-          categoryIdForPrice: "",
-          taskIdForOfferSelection,
-          useTaskIdForOfferSelection,
-          generateProductLink,
-          paramNameForPrice: stripParamNameForPrice(paramName),
-          valueForPrice,
-          priceUrl,
-          priceLinkTitle,
-          restorePageSizeUrl: buildRestorePageSizeUrl(sourceId, sourceType, finalCategoryId || "", taskIdForOfferSelection),
-          fields
-        });
-        showToast("Задача добавлена в очередь", btn, "success", 1700);
+        const offerIdsCacheKey = `${sourceType}|${sourceId}|${finalCategoryId || ""}|${taskIdForOfferSelection || ""}`;
+        let enqueuedCount = 0;
+        let enqueueErrors = 0;
+        for (const valueForFile of valuesForExport) {
+          try {
+            const links = buildValueWithLink(valueForFile);
+            const valueLink = typeof links === "string" ? links : links.valueLink;
+            const productLink = typeof links === "string" ? "" : links.productLink;
+            const valueForPrice = (String(valueForFile || "")).toLowerCase();
+            const fields = {
+              "Дата добавления": timestamp,
+              "Категория товара": category,
+              "Атрибут": attribute,
+              "Значение параметра": valueLink,
+              "Номер задачи": taskIdForFields,
+              "Ссылка на товар": productLink
+            };
+            await enqueueExportTask({
+              sheetUrl: data.sheetUrl,
+              sourceId,
+              sourceType,
+              sourceOrigin: window.location.origin,
+              categoryIdForOnModeration: finalCategoryId || "",
+              categoryIdForPrice: "",
+              taskIdForOfferSelection,
+              useTaskIdForOfferSelection,
+              generateProductLink,
+              paramNameForPrice: stripParamNameForPrice(paramName),
+              valueForPrice,
+              priceUrl,
+              priceLinkTitle,
+              offerIdsCacheKey,
+              restorePageSizeUrl: buildRestorePageSizeUrl(sourceId, sourceType, finalCategoryId || "", taskIdForOfferSelection),
+              fields
+            });
+            enqueuedCount += 1;
+            console.log("[RW] enqueue selected value:", valueForFile, "taskIdForFields=", taskIdForFields);
+          } catch (enqueueError) {
+            enqueueErrors += 1;
+            console.error("[RW] enqueue failed for selected value:", valueForFile, enqueueError?.message || enqueueError);
+          }
+        }
+        if (enqueuedCount > 1 && enqueueErrors === 0) {
+          showToast(`Добавлено ${enqueuedCount} задач в очередь`, btn, "success", 2200);
+        } else if (enqueuedCount === 1 && enqueueErrors === 0) {
+          showToast("Задача добавлена в очередь", btn, "success", 1700);
+        } else if (enqueuedCount > 0 && enqueueErrors > 0) {
+          showToast(`Добавлено ${enqueuedCount} из ${valuesForExport.length}`, btn, "warning", 2800);
+        } else {
+          showToast("Не удалось добавить задачи в очередь", btn, "error");
+        }
       } catch (error) {
         showToast(error.message || "Ошибка авторизации", btn, "error");
       }

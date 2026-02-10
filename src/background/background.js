@@ -781,11 +781,14 @@ const EXPORT_QUEUE_STATE_KEY = "rwExportQueueState";
 const EXPORT_QUEUE_DATA_KEY = "rwExportQueueData";
 const EXPORT_QUEUE_MAX_ITEMS = 200;
 const EXPORT_QUEUE_HISTORY_TTL_MS = 5 * 60 * 60 * 1000; // 5 часов
+const OFFER_IDS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 минут
 let _exportQueue = [];
 let _exportIsProcessing = false;
 let _queueInitialized = false;
+let _queueInitPromise = null;
 let _activeTaskId = "";
 let _activeTaskAbortController = null;
+const _offerIdsCache = new Map();
 
 function makeTaskId() {
   return `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -907,18 +910,7 @@ function sendOfferIdsToContentConsole(task, offerIds, url) {
 }
 
 async function fetchText(url, taskSignal) {
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), 30000);
-  const composite = new AbortController();
-  const abortComposite = () => composite.abort();
-  timeoutController.signal.addEventListener("abort", abortComposite, { once: true });
-  if (taskSignal) taskSignal.addEventListener("abort", abortComposite, { once: true });
-  let response;
-  try {
-    response = await fetch(url, { credentials: "include", signal: composite.signal });
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  const response = await fetch(url, { credentials: "include", signal: taskSignal });
   if (!response.ok) {
     throw new Error(`Ошибка загрузки: ${response.status} ${url}`);
   }
@@ -926,18 +918,7 @@ async function fetchText(url, taskSignal) {
 }
 
 async function fetchTextWithMeta(url, taskSignal) {
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), 30000);
-  const composite = new AbortController();
-  const abortComposite = () => composite.abort();
-  timeoutController.signal.addEventListener("abort", abortComposite, { once: true });
-  if (taskSignal) taskSignal.addEventListener("abort", abortComposite, { once: true });
-  let response;
-  try {
-    response = await fetch(url, { credentials: "include", signal: composite.signal });
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  const response = await fetch(url, { credentials: "include", signal: taskSignal });
   if (!response.ok) {
     throw new Error(`Ошибка загрузки: ${response.status} ${url}`);
   }
@@ -1026,12 +1007,41 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function makeOfferIdsCacheKey(task, sourceType, sourceId, categoryId, taskId) {
+  const explicit = String(task && task.offerIdsCacheKey ? task.offerIdsCacheKey : "").trim();
+  if (explicit) return explicit;
+  return `${sourceType}|${sourceId}|${categoryId}|${taskId}`;
+}
+
+function getOfferIdsFromCache(cacheKey) {
+  if (!cacheKey) return null;
+  const item = _offerIdsCache.get(cacheKey);
+  if (!item) return null;
+  if (Date.now() - item.ts > OFFER_IDS_CACHE_TTL_MS) {
+    _offerIdsCache.delete(cacheKey);
+    return null;
+  }
+  return Array.isArray(item.offerIds) ? item.offerIds : null;
+}
+
+function setOfferIdsCache(cacheKey, offerIds) {
+  if (!cacheKey || !Array.isArray(offerIds)) return;
+  _offerIdsCache.set(cacheKey, { ts: Date.now(), offerIds: offerIds.slice() });
+}
+
 async function collectOfferIdsForTask(task, taskSignal) {
   const sourceId = (task.sourceId || "").trim();
   if (!sourceId) return [];
   const categoryId = (task.categoryIdForOnModeration || "").trim();
   const taskId = task.useTaskIdForOfferSelection ? (task.taskIdForOfferSelection || "").trim() : "";
   const sourceType = (task.sourceType || "on-moderation").trim();
+  const cacheKey = makeOfferIdsCacheKey(task, sourceType, sourceId, categoryId, taskId);
+  const cachedOfferIds = getOfferIdsFromCache(cacheKey);
+  if (cachedOfferIds) {
+    console.log("[RW][QUEUE] offerIds cache hit:", cacheKey, "count=", cachedOfferIds.length);
+    sendOfferIdsToContentConsole(task, cachedOfferIds, "cache");
+    return cachedOfferIds;
+  }
   const perPage = "500";
   const makeUrl = (page) => {
     let base = "";
@@ -1155,6 +1165,7 @@ async function collectOfferIdsForTask(task, taskSignal) {
   }
 
   const offerIds = Array.from(allIdsSet);
+  setOfferIdsCache(cacheKey, offerIds);
   debugOfferIdsLog(firstUrl, offerIds);
   sendOfferIdsToContentConsole(task, offerIds, firstUrl);
   return offerIds;
@@ -1288,16 +1299,19 @@ function restoreQueueForProcessing(items) {
 
 function initializeQueue() {
   if (_queueInitialized) return Promise.resolve();
-  _queueInitialized = true;
-  return new Promise((resolve) => {
+  if (_queueInitPromise) return _queueInitPromise;
+  _queueInitPromise = new Promise((resolve) => {
     chrome.storage.local.get([EXPORT_QUEUE_DATA_KEY], (data) => {
       restoreQueueForProcessing(data && data[EXPORT_QUEUE_DATA_KEY]);
+      _queueInitialized = true;
       saveQueueState();
       saveQueueData();
       processExportQueue();
       resolve();
+      _queueInitPromise = null;
     });
   });
+  return _queueInitPromise;
 }
 
 async function processExportQueue() {

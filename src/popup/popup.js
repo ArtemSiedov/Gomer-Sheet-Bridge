@@ -4,6 +4,29 @@ const generateProductLinkCheckbox = document.getElementById("generateProductLink
 const customTaskIdInput = document.getElementById("customTaskId");
 const taskFilterWarning = document.getElementById("taskFilterWarning");
 const saveBtn = document.getElementById("save");
+const saveStatus = document.getElementById("saveStatus");
+
+let saveStatusTimer = null;
+
+function setSaveStatus(message, type) {
+  if (!saveStatus) return;
+  saveStatus.textContent = message || "";
+  saveStatus.classList.remove("ok", "error");
+  if (type === "ok" || type === "error") {
+    saveStatus.classList.add(type);
+  }
+  if (saveStatusTimer) {
+    clearTimeout(saveStatusTimer);
+    saveStatusTimer = null;
+  }
+  if (message) {
+    saveStatusTimer = setTimeout(() => {
+      saveStatus.textContent = "";
+      saveStatus.classList.remove("ok", "error");
+      saveStatusTimer = null;
+    }, 2500);
+  }
+}
 
 function updateTaskFilterWarning() {
   const customTaskId = customTaskIdInput.value.trim();
@@ -40,10 +63,19 @@ saveBtn.onclick = () => {
   const url = input.value.trim();
   const customTaskId = customTaskIdInput.value.trim();
   updateTaskFilterWarning();
+  saveBtn.disabled = true;
+  setSaveStatus("Сохраняем...", "");
   chrome.storage.sync.set({
     sheetUrl: url,
     useTaskIdForOfferSelection: useTaskIdCheckbox.checked,
     generateProductLink: generateProductLinkCheckbox.checked,
     customTaskId
+  }, () => {
+    saveBtn.disabled = false;
+    if (chrome.runtime.lastError) {
+      setSaveStatus(`Ошибка: ${chrome.runtime.lastError.message}`, "error");
+      return;
+    }
+    setSaveStatus("Сохранено", "ok");
   });
 };
