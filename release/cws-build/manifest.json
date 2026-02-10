@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Gomer Sheet Bridge",
+  "version": "1.0",
+  "permissions": [
+    "storage",
+    "identity"
+  ],
+  "host_permissions": [
+    "https://sheets.googleapis.com/*",
+    "https://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/content/content.js"
+      ]
+    }
+  ],
+  "background": {
+    "service_worker": "src/background/background.js"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html"
+  },
+  "oauth2": {
+    "client_id": "501648749442-dph2e7fvm084m68jq9pk3ofjrjo6f439.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/spreadsheets"
+    ]
+  }
+}
