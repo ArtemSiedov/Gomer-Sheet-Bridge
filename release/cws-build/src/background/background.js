@@ -188,32 +188,6 @@ function stripCdata(s) {
   return raw.slice(innerStart, cdataEnd).trim();
 }
 
-function decodeXmlEntities(value) {
-  if (typeof value !== "string") return value;
-  return value
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&#(\d+);/g, (_, code) => {
-      const n = Number(code);
-      return Number.isFinite(n) ? String.fromCharCode(n) : _;
-    });
-}
-
-function normalizeParamValue(value) {
-  let v = String(value || "");
-  v = stripCdata(v);
-  v = decodeXmlEntities(v);
-  v = v.replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
-  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-    v = v.slice(1, -1).trim();
-  }
-  return v.toLowerCase();
-}
-
 // Поиск оффера по categoryId и параметру (имя + значение). Потоковое чтение XML.
 function offerMatchesCategoryAndParam(offerXml, categoryId, paramName, paramValue) {
   const catStr = String(categoryId);
@@ -229,8 +203,9 @@ function offerMatchesCategoryAndParam(offerXml, categoryId, paramName, paramValu
   if (startVal === -1) return false;
   const endTag = afterName.indexOf("</param>");
   if (endTag === -1) return false;
-  const value = afterName.slice(startVal + 1, endTag).trim();
-  return normalizeParamValue(value) === normalizeParamValue(paramValue);
+  let value = afterName.slice(startVal + 1, endTag).trim();
+  value = stripCdata(value);
+  return value.toLowerCase() === String(paramValue || "").trim().toLowerCase();
 }
 
 // Проверка: оффер в списке offerIds и имеет параметр paramName = paramValue.
@@ -288,8 +263,20 @@ function offerMatchesIdsAndParam(offerXml, offerIdsSet, paramName, paramValue) {
       }
       if (_lastOfferDebug) _lastOfferDebug.paramFound += 1;
 
-      const value = normalizeParamValue(foundParamValue);
-      const searchValue = normalizeParamValue(paramValue);
+      let value = String(foundParamValue).trim();
+      value = stripCdata(value);
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1).trim();
+      }
+
+      const paramValNorm = (paramValue || "").trim();
+      let searchValue = paramValNorm;
+      if ((searchValue.startsWith('"') && searchValue.endsWith('"')) || (searchValue.startsWith("'") && searchValue.endsWith("'"))) {
+        searchValue = searchValue.slice(1, -1).trim();
+      }
+
+      value = value.toLowerCase();
+      searchValue = searchValue.toLowerCase();
       const matches = value === searchValue;
       if (matches) {
         console.log("[RW] ЗНАЧЕНИЕ СОВПАЛО:", "offerId=", offerId, "paramName=", nameKey, "value=", JSON.stringify(value));
@@ -336,9 +323,23 @@ function offerMatchesIdsAndParam(offerXml, offerIdsSet, paramName, paramValue) {
   const endTag = afterName.indexOf("</param>", startVal);
   if (endTag === -1) return false;
   
-  const rawValue = afterName.slice(startVal + 1, endTag).trim();
-  const value = normalizeParamValue(rawValue);
-  const searchValue = normalizeParamValue(paramValue);
+  let value = afterName.slice(startVal + 1, endTag).trim();
+  value = stripCdata(value);
+  
+  // Убираем кавычки из начала и конца значения, если они есть
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    value = value.slice(1, -1).trim();
+  }
+  
+  const paramValNorm = (paramValue || "").trim();
+  // Также убираем кавычки из искомого значения
+  let searchValue = paramValNorm;
+  if ((searchValue.startsWith('"') && searchValue.endsWith('"')) || (searchValue.startsWith("'") && searchValue.endsWith("'"))) {
+    searchValue = searchValue.slice(1, -1).trim();
+  }
+  
+  value = value.toLowerCase();
+  searchValue = searchValue.toLowerCase();
   const matches = value === searchValue;
   if (matches) {
     console.log("[RW] ЗНАЧЕНИЕ СОВПАЛО:", "offerId=", offerId, "paramName=", nameKey, "value=", JSON.stringify(value));
@@ -536,8 +537,8 @@ async function findOfferByOfferIdsAndParamSequential(url, offerIdsSet, paramName
   return null;
 }
 
-async function findOfferByCategoryAndParam(url, categoryId, paramName, paramValue, taskSignal) {
-  const response = await fetch(url, { signal: taskSignal });
+async function findOfferByCategoryAndParam(url, categoryId, paramName, paramValue) {
+  const response = await fetch(url);
   if (!response.ok && response.status !== 206) {
     throw new Error("HTTP " + response.status + ": " + response.statusText);
   }
@@ -598,7 +599,7 @@ async function findOfferByCategoryAndParam(url, categoryId, paramName, paramValu
   return null;
 }
 
-async function findOfferByOfferIdsAndParam(url, offerIds, paramName, paramValue, taskSignal) {
+async function findOfferByOfferIdsAndParam(url, offerIds, paramName, paramValue) {
   if (!offerIds || !offerIds.length) return null;
   _lastOfferDebug = initOfferDebug();
   const offerIdsSet = new Set(
@@ -607,7 +608,7 @@ async function findOfferByOfferIdsAndParam(url, offerIds, paramName, paramValue,
   console.log("[RW] findOfferByOfferIds: url=", url?.slice(0, 80), "offerIdsCount=", offerIds.length, "paramName=", paramName, "paramValue=", JSON.stringify((paramValue || "").slice(0, 60)));
 
   // Обычный последовательный поиск (без Range/параллелизма)
-  const response = await fetch(url, { signal: taskSignal });
+  const response = await fetch(url);
   if (!response.ok || !response.body) {
     if (!response.ok) console.error("[RW] findOfferByOfferIds: прайс вернул ошибку, url=", url, "status=", response.status);
     throw new Error(response.ok ? "Streaming not supported" : "HTTP " + response.status);
@@ -777,640 +778,7 @@ async function appendFields(sheetUrl, fields) {
   return { ok: true, result };
 }
 
-const EXPORT_QUEUE_STATE_KEY = "rwExportQueueState";
-const EXPORT_QUEUE_DATA_KEY = "rwExportQueueData";
-const EXPORT_QUEUE_MAX_ITEMS = 200;
-const EXPORT_QUEUE_HISTORY_TTL_MS = 5 * 60 * 60 * 1000; // 5 часов
-let _exportQueue = [];
-let _exportIsProcessing = false;
-let _queueInitialized = false;
-let _activeTaskId = "";
-let _activeTaskAbortController = null;
-
-function makeTaskId() {
-  return `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function makeTaskTitle(task) {
-  const attr = task?.fields?.["Атрибут"] || "Без атрибута";
-  const value = task?.fields?.["Значение параметра"];
-  const text = typeof value === "object" && value && value.text ? value.text : value || "";
-  return `${attr}${text ? `: ${String(text).slice(0, 40)}` : ""}`;
-}
-
-function createQueueStateSnapshot() {
-  pruneQueueHistory();
-  const pendingCount = _exportQueue.filter((task) => task.status === "pending").length;
-  const processingCount = _exportQueue.filter((task) => task.status === "processing").length;
-  const doneCount = _exportQueue.filter((task) => task.status === "done").length;
-  const errorCount = _exportQueue.filter((task) => task.status === "error").length;
-  const items = _exportQueue.slice(-EXPORT_QUEUE_MAX_ITEMS).map((task) => ({
-    id: task.id,
-    status: task.status,
-    title: task.title,
-    message: task.message || "",
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt
-  }));
-  return {
-    updatedAt: Date.now(),
-    processing: _exportIsProcessing,
-    pendingCount,
-    processingCount,
-    doneCount,
-    errorCount,
-    totalCount: _exportQueue.length,
-    items
-  };
-}
-
-function saveQueueState() {
-  chrome.storage.local.set({ [EXPORT_QUEUE_STATE_KEY]: createQueueStateSnapshot() });
-}
-
-function saveQueueData() {
-  pruneQueueHistory();
-  chrome.storage.local.set({ [EXPORT_QUEUE_DATA_KEY]: _exportQueue.slice(-EXPORT_QUEUE_MAX_ITEMS) });
-}
-
-function pruneQueueHistory() {
-  const cutoff = Date.now() - EXPORT_QUEUE_HISTORY_TTL_MS;
-  _exportQueue = _exportQueue.filter((task) => {
-    if (!task) return false;
-    if (task.status === "pending" || task.status === "processing") return true;
-    const ts = Number(task.updatedAt || task.createdAt || 0);
-    return ts >= cutoff;
-  });
-}
-
-function setTaskState(task, status, message) {
-  task.status = status;
-  if (message) task.message = message;
-  task.updatedAt = Date.now();
-  saveQueueState();
-  saveQueueData();
-}
-
-function isTaskAborted(taskSignal) {
-  return Boolean(taskSignal && taskSignal.aborted);
-}
-
-function throwIfTaskAborted(taskSignal) {
-  if (!isTaskAborted(taskSignal)) return;
-  throw new Error("Остановлено пользователем");
-}
-
-function parseOfferIdsFromHtml(html) {
-  if (!html || typeof html !== "string") return [];
-  const seen = new Set();
-  let match = null;
-
-  // Берем только значения вида "Offer ID: ...".
-  // Не парсим data-key/data-id и другие числа со страницы, чтобы не ловить лишние ID.
-  const offerIdLabelRegex = /Offer ID:\s*([A-Za-z0-9_-]+)/g;
-  while ((match = offerIdLabelRegex.exec(html)) !== null) {
-    const id = String(match[1] || "").trim();
-    if (id) seen.add(id);
-  }
-
-  return Array.from(seen).filter((id) => {
-    if (/^\d{5,}$/.test(id)) return true;
-    return /^[A-Za-z0-9_-]{5,}$/.test(id);
-  });
-}
-
-function debugOfferIdsLog(url, offerIds) {
-  const count = Array.isArray(offerIds) ? offerIds.length : 0;
-  const sample = Array.isArray(offerIds) ? offerIds.slice(0, 12) : [];
-  console.log(
-    "[RW][QUEUE] offerIds parsed:",
-    "count=",
-    count,
-    "sample=",
-    sample,
-    "url=",
-    String(url || "").slice(0, 220)
-  );
-}
-
-function sendOfferIdsToContentConsole(task, offerIds, url) {
-  const tabId = Number(task && task.senderTabId);
-  if (!Number.isInteger(tabId)) return;
-  try {
-    chrome.tabs.sendMessage(tabId, {
-      type: "RW_QUEUE_DEBUG_OFFER_IDS",
-      count: Array.isArray(offerIds) ? offerIds.length : 0,
-      offerIds: Array.isArray(offerIds) ? offerIds : [],
-      url: String(url || "")
-    });
-  } catch (_) {}
-}
-
-async function fetchText(url, taskSignal) {
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), 30000);
-  const composite = new AbortController();
-  const abortComposite = () => composite.abort();
-  timeoutController.signal.addEventListener("abort", abortComposite, { once: true });
-  if (taskSignal) taskSignal.addEventListener("abort", abortComposite, { once: true });
-  let response;
-  try {
-    response = await fetch(url, { credentials: "include", signal: composite.signal });
-  } finally {
-    clearTimeout(timeoutId);
-  }
-  if (!response.ok) {
-    throw new Error(`Ошибка загрузки: ${response.status} ${url}`);
-  }
-  return response.text();
-}
-
-async function fetchTextWithMeta(url, taskSignal) {
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), 30000);
-  const composite = new AbortController();
-  const abortComposite = () => composite.abort();
-  timeoutController.signal.addEventListener("abort", abortComposite, { once: true });
-  if (taskSignal) taskSignal.addEventListener("abort", abortComposite, { once: true });
-  let response;
-  try {
-    response = await fetch(url, { credentials: "include", signal: composite.signal });
-  } finally {
-    clearTimeout(timeoutId);
-  }
-  if (!response.ok) {
-    throw new Error(`Ошибка загрузки: ${response.status} ${url}`);
-  }
-  const pageCountHeader = Number(response.headers.get("X-Pagination-Page-Count") || 0);
-  const totalCountHeader = Number(response.headers.get("X-Pagination-Total-Count") || 0);
-  const perPageHeader = Number(response.headers.get("X-Pagination-Per-Page") || 0);
-  return {
-    text: await response.text(),
-    pageCount: Number.isFinite(pageCountHeader) && pageCountHeader > 0 ? pageCountHeader : 0,
-    totalCount: Number.isFinite(totalCountHeader) && totalCountHeader > 0 ? totalCountHeader : 0,
-    perPage: Number.isFinite(perPageHeader) && perPageHeader > 0 ? perPageHeader : 0
-  };
-}
-
-async function pingUrl(url, taskSignal) {
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), 10000);
-  const composite = new AbortController();
-  const abortComposite = () => composite.abort();
-  timeoutController.signal.addEventListener("abort", abortComposite, { once: true });
-  if (taskSignal) taskSignal.addEventListener("abort", abortComposite, { once: true });
-  try {
-    await fetch(url, { credentials: "include", signal: composite.signal });
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function restorePageSizeIfNeeded(task, taskSignal) {
-  const restoreUrl = String(task && task.restorePageSizeUrl ? task.restorePageSizeUrl : "").trim();
-  if (!restoreUrl) return;
-  try {
-    await pingUrl(restoreUrl, taskSignal);
-  } catch (_) {}
-}
-
-async function withTimeout(promise, timeoutMs, timeoutMessage) {
-  let timeoutId = null;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
-  });
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-  }
-}
-
-function shouldSkipPriceSearchOnError(error) {
-  const msg = String(error && error.message ? error.message : error || "").toLowerCase();
-  return (
-    msg.includes("504") ||
-    msg.includes("gateway time-out") ||
-    msg.includes("gateway timeout") ||
-    msg.includes("signal is aborted") ||
-    msg.includes("aborted") ||
-    msg.includes("timeout") ||
-    msg.includes("failed to fetch") ||
-    msg.includes("networkerror")
-  );
-}
-
-function getMaxPageFromHtml(html) {
-  if (!html || typeof html !== "string") return 1;
-  let maxPage = 1;
-  const pageRegex = /[?&]page=(\d+)/g;
-  let match = null;
-  while ((match = pageRegex.exec(html)) !== null) {
-    const page = Number(match[1]);
-    if (Number.isFinite(page) && page > maxPage) maxPage = page;
-  }
-  return maxPage;
-}
-
-function getTotalRowsFromHtml(html) {
-  if (!html || typeof html !== "string") return 0;
-  // Берем значение из strong.selected_rows_total (по аналогии с DOM-селектором)
-  const classMatch = html.match(/<strong[^>]*class=["'][^"']*selected_rows_total[^"']*["'][^>]*>\s*([\d\s.,]+)\s*<\/strong>/i);
-  if (!classMatch || !classMatch[1]) return 0;
-  const normalized = String(classMatch[1]).replace(/[^\d]/g, "");
-  const total = Number(normalized);
-  return Number.isFinite(total) ? total : 0;
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function collectOfferIdsForTask(task, taskSignal) {
-  const sourceId = (task.sourceId || "").trim();
-  if (!sourceId) return [];
-  const categoryId = (task.categoryIdForOnModeration || "").trim();
-  const taskId = task.useTaskIdForOfferSelection ? (task.taskIdForOfferSelection || "").trim() : "";
-  const sourceType = (task.sourceType || "on-moderation").trim();
-  const perPage = "500";
-  const makeUrl = (page) => {
-    let base = "";
-    const p = new URLSearchParams();
-    if (categoryId) p.set("rz_category_id", categoryId);
-    if (taskId) p.set("ItemSearch[bpm_number]", taskId);
-
-    if (sourceType === "active") {
-      p.set("page", String(page));
-      p.set("per-page", perPage);
-      base = `https://gomer.rozetka.company/gomer/items/active/source/${sourceId}`;
-    } else if (sourceType === "changes") {
-      p.set("page", String(page));
-      p.set("per-page", perPage);
-      base = `https://gomer.rozetka.company/gomer/items/changes/source/${sourceId}`;
-    } else {
-      // Для /items/source используется size, а не per-page (иначе часто отдает только 20 строк)
-      p.set("size", perPage);
-      p.set("page", String(page));
-      base = `https://gomer.rozetka.company/gomer/items/source/${sourceId}`;
-    }
-
-    return `${base}?${p.toString()}`;
-  };
-
-  const logOfferIdsRequest = (page, url) => {
-    console.log(
-      "[RW][OFFER_IDS][REQUEST]",
-      "sourceId=",
-      sourceId || "(empty)",
-      "rz_category_id=",
-      categoryId || "(empty)",
-      "bpm_number=",
-      taskId || "(empty)",
-      "page=",
-      page,
-      "perPage=",
-      perPage,
-      "sourceType=",
-      sourceType,
-      "url=",
-      url
-    );
-  };
-
-  const allIdsSet = new Set();
-  const perPageNum = Number(perPage) || 500;
-  const parallelPages = 3;
-  const restoreDelayMs = 500;
-  const firstUrl = makeUrl(1);
-  logOfferIdsRequest(1, firstUrl);
-  throwIfTaskAborted(taskSignal);
-  // После небольшой задержки возвращаем пользовательский size/per-page.
-  const firstFetchPromise = fetchTextWithMeta(firstUrl, taskSignal);
-  await delay(restoreDelayMs);
-  await restorePageSizeIfNeeded(task, taskSignal);
-  const firstMeta = await firstFetchPromise;
-  const firstHtml = firstMeta.text;
-  const firstIds = parseOfferIdsFromHtml(firstHtml);
-  firstIds.forEach((id) => allIdsSet.add(id));
-  const totalRows = firstMeta.totalCount || getTotalRowsFromHtml(firstHtml);
-  const maxPageByHeader = firstMeta.pageCount || 0;
-  const maxPageByTotal = totalRows > 0 ? Math.ceil(totalRows / perPageNum) : 0;
-  const maxPageByLinks = getMaxPageFromHtml(firstHtml);
-  const maxPage = Math.max(1, maxPageByHeader || 0, maxPageByTotal || 0, maxPageByLinks || 0);
-
-  console.log(
-    "[RW][QUEUE] offerIds pages:",
-    "totalRows=",
-    totalRows,
-    "pageCountHeader=",
-    maxPageByHeader,
-    "totalPages=",
-    maxPage,
-    "per-page=",
-    firstMeta.perPage || perPage,
-    "sourceType=",
-    sourceType
-  );
-  console.log("[RW][QUEUE] offerIds page 1/", maxPage, "ids=", firstIds.length);
-
-  for (let startPage = 2; startPage <= maxPage; startPage += parallelPages) {
-    const endPage = Math.min(maxPage, startPage + parallelPages - 1);
-    const pages = [];
-    for (let page = startPage; page <= endPage; page += 1) {
-      pages.push(page);
-    }
-
-    const results = await Promise.all(
-      pages.map(async (page) => {
-        const pageUrl = makeUrl(page);
-        logOfferIdsRequest(page, pageUrl);
-        try {
-          throwIfTaskAborted(taskSignal);
-          // Не ждем ответа выборки: после небольшой задержки отправляем restore пользовательского размера страницы.
-          const pageFetchPromise = fetchText(pageUrl, taskSignal);
-          await delay(restoreDelayMs);
-          await restorePageSizeIfNeeded(task, taskSignal);
-          const html = await pageFetchPromise;
-          const pageIds = parseOfferIdsFromHtml(html);
-          return { ok: true, page, pageIds };
-        } catch (error) {
-          return { ok: false, page, error: error?.message || String(error) };
-        }
-      })
-    );
-    throwIfTaskAborted(taskSignal);
-
-    let hasError = false;
-    for (const result of results) {
-      if (!result.ok) {
-        hasError = true;
-        console.warn("[RW][QUEUE] offerIds page error", `${result.page}/${maxPage}`, result.error);
-        continue;
-      }
-      result.pageIds.forEach((id) => allIdsSet.add(id));
-      console.log("[RW][QUEUE] offerIds page", `${result.page}/${maxPage}`, "ids=", result.pageIds.length);
-    }
-    if (hasError) break;
-    throwIfTaskAborted(taskSignal);
-  }
-
-  const offerIds = Array.from(allIdsSet);
-  debugOfferIdsLog(firstUrl, offerIds);
-  sendOfferIdsToContentConsole(task, offerIds, firstUrl);
-  return offerIds;
-}
-
-function buildProductLink(origin, sourceId, offerId) {
-  const params = new URLSearchParams({
-    "ItemSearch[id]": offerId,
-    "ItemSearch[name]": "",
-    "ItemSearch[sync_source_vendors_id]": "",
-    sort: "",
-    sync_source_category_id: "",
-    rz_category_id: "",
-    "ItemSearch[upload_status]": "",
-    "ItemSearch[available]": "",
-    "ItemSearch[bpm_number]": "",
-    "ItemSearch[moderation_type]": ""
-  });
-  return `${origin}/gomer/items/source/${sourceId}?${params.toString()}`;
-}
-
-async function processExportTask(task, taskSignal) {
-  task.skipPriceReason = "";
-  throwIfTaskAborted(taskSignal);
-  setTaskState(task, "processing", "Подготовка");
-
-  const fields = { ...(task.fields || {}) };
-  const generateProductLink = typeof task.generateProductLink === "boolean" ? task.generateProductLink : true;
-  const sourceId = (task.sourceId || "").trim();
-  const sourceOrigin = (task.sourceOrigin || "https://gomer.rozetka.company").trim();
-  const paramName = (task.paramNameForPrice || "").trim();
-  const paramValue = String(task.valueForPrice || "").trim().toLowerCase();
-  const priceUrl = (task.priceUrl || "").trim();
-  const priceLinkTitle = String(task.priceLinkTitle || "");
-  const isPriceUnavailable =
-    !priceUrl ||
-    priceUrl === "javascript:void(0)" ||
-    priceUrl.includes("javascript:void(0)") ||
-    priceLinkTitle.includes("Api virtual source");
-
-  let productLink = "";
-
-  if (!generateProductLink) {
-    setTaskState(task, "processing", "Генерация ссылки отключена");
-    productLink = "";
-  } else if (!isPriceUnavailable && sourceId && paramName && paramValue) {
-    try {
-      throwIfTaskAborted(taskSignal);
-      setTaskState(task, "processing", "Загрузка списка товаров");
-      const offerIds = await collectOfferIdsForTask(task, taskSignal);
-      throwIfTaskAborted(taskSignal);
-      setTaskState(task, "processing", `Собрано offerId: ${offerIds.length}`);
-
-      let foundOfferId = "";
-      if (offerIds.length) {
-        throwIfTaskAborted(taskSignal);
-        setTaskState(task, "processing", "Поиск в прайсе по offerId");
-        foundOfferId = await findOfferByOfferIdsAndParam(priceUrl, offerIds, paramName, paramValue, taskSignal);
-      } else if (task.categoryIdForPrice) {
-        throwIfTaskAborted(taskSignal);
-        setTaskState(task, "processing", "Поиск в прайсе по категории");
-        foundOfferId = await findOfferByCategoryAndParam(
-          priceUrl,
-          task.categoryIdForPrice,
-          paramName,
-          paramValue,
-          taskSignal
-        );
-      }
-
-      if (foundOfferId) {
-        productLink = { text: "Ссылка", url: buildProductLink(sourceOrigin, sourceId, foundOfferId) };
-        setTaskState(task, "processing", `Найден offerId: ${foundOfferId}`);
-      } else {
-        productLink = "";
-        setTaskState(task, "processing", "offerId не найден, запись без ссылки");
-      }
-    } catch (error) {
-      if (isTaskAborted(taskSignal)) {
-        throw new Error("Остановлено пользователем");
-      }
-      if (shouldSkipPriceSearchOnError(error)) {
-        productLink = "";
-        task.skipPriceReason = "504/timeout, запись без ссылки";
-        setTaskState(task, "processing", "Прайс/поиск недоступен (504/timeout), запись без ссылки");
-      } else {
-        throw error;
-      }
-    }
-  } else {
-    setTaskState(task, "processing", "Прайс недоступен, запись без ссылки");
-  }
-
-  fields["Ссылка на товар"] = productLink;
-
-  throwIfTaskAborted(taskSignal);
-  setTaskState(task, "processing", "Запись в Google Sheets");
-  const appendResult = await withTimeout(
-    appendFields(task.sheetUrl, fields),
-    45000,
-    "Таймаут записи в Google Sheets"
-  );
-  if (!appendResult || !appendResult.ok) {
-    throw new Error(appendResult?.error || "Ошибка записи в Google Sheets");
-  }
-
-  // Важно: запрос с увеличенным size/per-page может менять серверное состояние пагинации в сессии.
-  // После обработки задачи возвращаем пользовательский размер страницы.
-  const restoreUrl = String(task.restorePageSizeUrl || "").trim();
-  if (restoreUrl) {
-    try {
-      await restorePageSizeIfNeeded(task, taskSignal);
-      console.log("[RW][QUEUE] page-size restored:", restoreUrl);
-    } catch (e) {
-      console.warn("[RW][QUEUE] page-size restore failed:", e?.message || e);
-    }
-  }
-}
-
-function restoreQueueForProcessing(items) {
-  const normalized = Array.isArray(items) ? items : [];
-  _exportQueue = normalized
-    .slice(-EXPORT_QUEUE_MAX_ITEMS)
-    .map((task) => ({
-      ...task,
-      status: task.status === "done" || task.status === "error" ? task.status : "pending",
-      updatedAt: Number(task.updatedAt || task.createdAt || Date.now())
-    }));
-  pruneQueueHistory();
-}
-
-function initializeQueue() {
-  if (_queueInitialized) return Promise.resolve();
-  _queueInitialized = true;
-  return new Promise((resolve) => {
-    chrome.storage.local.get([EXPORT_QUEUE_DATA_KEY], (data) => {
-      restoreQueueForProcessing(data && data[EXPORT_QUEUE_DATA_KEY]);
-      saveQueueState();
-      saveQueueData();
-      processExportQueue();
-      resolve();
-    });
-  });
-}
-
-async function processExportQueue() {
-  await initializeQueue();
-  if (_exportIsProcessing) return;
-  _exportIsProcessing = true;
-  saveQueueState();
-  try {
-    while (true) {
-      const nextTask = _exportQueue.find((task) => task.status === "pending");
-      if (!nextTask) break;
-      const taskController = new AbortController();
-      _activeTaskId = nextTask.id;
-      _activeTaskAbortController = taskController;
-      try {
-        setTaskState(nextTask, "processing", "Запуск обработки");
-        await processExportTask(nextTask, taskController.signal);
-        const doneMessage = nextTask.skipPriceReason
-          ? `Готово • ${nextTask.skipPriceReason}`
-          : "Готово";
-        setTaskState(nextTask, "done", doneMessage);
-      } catch (error) {
-        setTaskState(nextTask, "error", error?.message || "Ошибка обработки");
-      } finally {
-        if (_activeTaskId === nextTask.id) {
-          _activeTaskId = "";
-          _activeTaskAbortController = null;
-        }
-      }
-    }
-  } finally {
-    _exportIsProcessing = false;
-    saveQueueState();
-  }
-}
-
-function enqueueExportTask(payload) {
-  pruneQueueHistory();
-  const task = {
-    id: makeTaskId(),
-    title: makeTaskTitle(payload),
-    status: "pending",
-    message: "В очереди",
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    ...payload
-  };
-  _exportQueue.push(task);
-  if (_exportQueue.length > EXPORT_QUEUE_MAX_ITEMS) {
-    _exportQueue = _exportQueue.slice(-EXPORT_QUEUE_MAX_ITEMS);
-  }
-  saveQueueState();
-  saveQueueData();
-  processExportQueue();
-  return task.id;
-}
-
-function killExportTask(taskId) {
-  const id = String(taskId || "").trim();
-  if (!id) return { ok: false, error: "Не передан id задачи" };
-  const task = _exportQueue.find((item) => item.id === id);
-  if (!task) return { ok: false, error: "Задача не найдена" };
-
-  if (_activeTaskId === id && _activeTaskAbortController) {
-    try {
-      _activeTaskAbortController.abort();
-    } catch (_) {}
-  }
-
-  _exportQueue = _exportQueue.filter((item) => item.id !== id);
-  saveQueueState();
-  saveQueueData();
-  processExportQueue();
-  return { ok: true };
-}
-
-chrome.runtime.onStartup.addListener(() => {
-  initializeQueue();
-});
-
-chrome.runtime.onInstalled.addListener(() => {
-  initializeQueue();
-});
-
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message && message.type === "ENQUEUE_EXPORT_TASK") {
-    initializeQueue()
-      .then(() => {
-        const payload = {
-          ...(message.task || {}),
-          senderTabId: sender && sender.tab ? sender.tab.id : null
-        };
-        const taskId = enqueueExportTask(payload);
-        sendResponse({ ok: true, taskId });
-      })
-      .catch((error) => {
-        sendResponse({ ok: false, error: error?.message || "Не удалось добавить задачу в очередь" });
-      });
-    return true;
-  }
-
-  if (message && message.type === "KILL_EXPORT_TASK") {
-    initializeQueue()
-      .then(() => {
-        const result = killExportTask(message.taskId);
-        sendResponse(result);
-      })
-      .catch((error) => {
-        sendResponse({ ok: false, error: error?.message || "Не удалось удалить задачу" });
-      });
-    return true;
-  }
-
   if (message && message.type === "GET_AUTH_TOKEN") {
     chrome.identity.getAuthToken({ interactive: true }, (token) => {
       if (chrome.runtime.lastError) {

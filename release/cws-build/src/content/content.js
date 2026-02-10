@@ -88,17 +88,19 @@ function getTaskIdFromCurrentPage() {
   
   // Для страницы active используем специальный селектор
   if (window.location.href.includes("/gomer/items/active/source/")) {
-    const taskCell = document.querySelector("#sync-sources-container > table > tbody > tr > td:nth-child(10)");
-    const id = extractLastRequestId(taskCell || document);
-    if (id) return id;
+    const taskEl = document.querySelector("#sync-sources-container > table > tbody > tr > td:nth-child(10) > a:nth-child(1)");
+    if (taskEl && taskEl.textContent) {
+      return (taskEl.textContent || "").trim().replace(/,/g, "");
+    }
     return "";
   }
   
   // Для страницы changes используем специальный селектор
   if (window.location.href.includes("/gomer/items/changes/source/")) {
-    const taskCell = document.querySelector("#sync-sources-container > table > tbody > tr > td:nth-child(14)");
-    const id = extractLastRequestId(taskCell || document);
-    if (id) return id;
+    const taskEl = document.querySelector("#sync-sources-container > table > tbody > tr > td:nth-child(14) > a:nth-child(1)");
+    if (taskEl && taskEl.textContent) {
+      return (taskEl.textContent || "").trim().replace(/,/g, "");
+    }
     return "";
   }
   
@@ -111,40 +113,9 @@ function getTaskIdFromCurrentPage() {
   ];
   for (const sel of taskSelectors) {
     const el = document.querySelector(sel);
-    if (el) {
-      const id = extractLastRequestId(el.parentElement || el);
-      if (id) return id;
-    }
+    if (el && (el.textContent || "").trim()) return (el.textContent || "").trim().replace(/,/g, "");
   }
   return "";
-}
-
-function extractLastRequestId(root) {
-  if (!root) return "";
-  const links = root.querySelectorAll('a[href*="/request/view/"], a[href*="lisa/#/request/view/"]');
-  let lastId = "";
-
-  links.forEach((a) => {
-    const href = a.getAttribute("href") || "";
-    const hrefMatch = href.match(/\/request\/view\/(\d+)/) || href.match(/lisa\/#\/request\/view\/(\d+)/);
-    if (hrefMatch && hrefMatch[1]) {
-      lastId = hrefMatch[1];
-      return;
-    }
-    const text = (a.textContent || "").trim().replace(/[^\d]/g, "");
-    if (text) lastId = text;
-  });
-
-  if (lastId) return lastId;
-
-  // Фоллбек: ищем все request/view/{id} прямо в html куске и берем последний
-  const html = root.innerHTML || "";
-  const regex = /request\/view\/(\d+)/g;
-  let match;
-  while ((match = regex.exec(html)) !== null) {
-    if (match[1]) lastId = match[1];
-  }
-  return lastId;
 }
 
 function buildValueWithLink(value) {
@@ -210,382 +181,6 @@ function trackModalOpener() {
 const BINDING_TASK_ID_KEY = "bindingPageTaskId";
 const BINDING_CATEGORY_ID_KEY = "bindingPageCategoryId";
 const BINDING_SOURCE_PAGE_KEY = "bindingPageSourceType";
-const SETTINGS_USE_TASK_FILTER_KEY = "useTaskIdForOfferSelection";
-const SETTINGS_CUSTOM_TASK_ID_KEY = "customTaskId";
-const SETTINGS_GENERATE_PRODUCT_LINK_KEY = "generateProductLink";
-
-function normalizeTaskId(value) {
-  return String(value || "").replace(/[^\d]/g, "").trim();
-}
-
-function resolveUseTaskFilter(value) {
-  return typeof value === "boolean" ? value : true;
-}
-
-function resolveGenerateProductLink(value) {
-  return typeof value === "boolean" ? value : true;
-}
-
-function showTaskFilterWarning(anchor, customTaskId) {
-  if (!customTaskId) return;
-  showToast(
-    `Включен фильтр по номеру заявки: ${customTaskId}. Убедитесь, что по этому номеру есть товары.`,
-    anchor,
-    "warning",
-    3200
-  );
-}
-
-function enqueueExportTask(task) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ type: "ENQUEUE_EXPORT_TASK", task }, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      if (!response || !response.ok) {
-        reject(new Error(response && response.error ? response.error : "Не удалось поставить задачу в очередь"));
-        return;
-      }
-      resolve(response.taskId);
-    });
-  });
-}
-
-function killExportTask(taskId) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ type: "KILL_EXPORT_TASK", taskId }, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      if (!response || !response.ok) {
-        reject(new Error(response && response.error ? response.error : "Не удалось остановить задачу"));
-        return;
-      }
-      resolve(true);
-    });
-  });
-}
-
-chrome.runtime.onMessage.addListener((message) => {
-  if (!message || message.type !== "RW_QUEUE_DEBUG_OFFER_IDS") return;
-  const ids = Array.isArray(message.offerIds) ? message.offerIds : [];
-  console.log(
-    "[RW][OFFER_IDS]",
-    "count=",
-    message.count || ids.length,
-    "url=",
-    message.url || "",
-    "ids=",
-    ids
-  );
-});
-
-function detectSourceTypeByUrl(url) {
-  const u = String(url || "");
-  if (u.includes("/gomer/items/active/source/")) return "active";
-  if (u.includes("/gomer/items/changes/source/")) return "changes";
-  return "on-moderation";
-}
-
-async function resolveSourceTypeForQueue() {
-  if (window.location.href.includes("/gomer/sellers/attributes/binding-attribute-page/source/")) {
-    const storageData = await new Promise((resolve) => {
-      chrome.storage.sync.get([BINDING_SOURCE_PAGE_KEY], resolve);
-    });
-    return (storageData[BINDING_SOURCE_PAGE_KEY] || "on-moderation").trim() || "on-moderation";
-  }
-  return detectSourceTypeByUrl(window.location.href);
-}
-
-function getPriceLinkMeta(sourceId) {
-  const nav = document.querySelector("ul.nav-groupsourceHref");
-  let priceLinkEl = null;
-  if (nav) {
-    const activeLi = nav.querySelector("li.active");
-    const link = activeLi ? activeLi.querySelector("a[href]") : null;
-    if (link && link.href) priceLinkEl = link;
-    if (!priceLinkEl) {
-      const bySource = Array.from(nav.querySelectorAll("a[href]")).find(
-        (a) => a.href && String(a.href).includes(sourceId)
-      );
-      if (bySource) priceLinkEl = bySource;
-    }
-    if (!priceLinkEl) priceLinkEl = nav.querySelector("a[href]");
-  }
-  if (!priceLinkEl) {
-    priceLinkEl = document.querySelector(
-      "body > div.wrapper > header > nav > ul.nav.navbar-nav.btn-group.nav-group.nav-groupsourceHref > a"
-    );
-  }
-  return {
-    priceUrl: priceLinkEl ? priceLinkEl.href : "",
-    priceLinkTitle: priceLinkEl ? priceLinkEl.getAttribute("title") || "" : ""
-  };
-}
-
-function getCurrentUiPageSize() {
-  const sizeSelectors = [
-    'select[name="per-page"]',
-    'select[name="size"]',
-    'input[name="per-page"]',
-    'input[name="size"]',
-    '#sync-sources-container select[name="per-page"]',
-    '#sync-sources-container input[name="per-page"]'
-  ];
-  for (const sel of sizeSelectors) {
-    const el = document.querySelector(sel);
-    if (!el) continue;
-    const raw = (el.value || el.getAttribute("value") || "").trim();
-    if (/^\d+$/.test(raw)) return raw;
-  }
-  try {
-    const u = new URL(window.location.href);
-    const size =
-      (u.searchParams.get("size") || "").trim() ||
-      (u.searchParams.get("per-page") || "").trim();
-    return /^\d+$/.test(size) ? size : "";
-  } catch (_) {
-    return "";
-  }
-}
-
-function buildRestorePageSizeUrl(sourceId, sourceType, categoryIdForOnModeration, taskIdForOfferSelection) {
-  const size = getCurrentUiPageSize();
-  const p = new URLSearchParams();
-  if (size) {
-    if (sourceType === "active" || sourceType === "changes") {
-      p.set("per-page", size);
-    } else {
-      p.set("size", size);
-    }
-  }
-  p.set("page", "1");
-  const base =
-    sourceType === "active"
-      ? `${window.location.origin}/gomer/items/active/source/${sourceId}`
-      : sourceType === "changes"
-        ? `${window.location.origin}/gomer/items/changes/source/${sourceId}`
-        : `${window.location.origin}/gomer/items/source/${sourceId}`;
-  return `${base}?${p.toString()}`;
-}
-
-function initQueuePanel() {
-  if (document.getElementById("rw-queue-body")) return;
-
-  const hostNav = document.querySelector("body > div.wrapper > header > nav > div > ul");
-  if (!hostNav) return;
-  const li = document.createElement("li");
-  li.className = "nav-group";
-  li.id = "rw-queue-nav-group";
-  li.style.setProperty("margin-right", "0", "important");
-  li.style.setProperty("padding-right", "0", "important");
-
-  const btnGroup = document.createElement("div");
-  btnGroup.className = "btn-group";
-  btnGroup.style.setProperty("margin-right", "0", "important");
-
-  const currentBtn = document.createElement("a");
-  currentBtn.href = "javascript:void(0)";
-  currentBtn.className = "user-current-context btn btn-primary";
-  currentBtn.innerHTML = '<i class="fa fa-history" aria-hidden="true"></i>';
-  currentBtn.style.padding = "6px 8px";
-  currentBtn.style.lineHeight = "1.42857143";
-  currentBtn.style.margin = "0";
-
-  const dropdownBtn = document.createElement("button");
-  dropdownBtn.type = "button";
-  dropdownBtn.className = "btn btn-primary dropdown-toggle";
-  dropdownBtn.setAttribute("data-toggle", "dropdown");
-  dropdownBtn.innerHTML = '<span class="caret"></span>';
-
-  const menu = document.createElement("ul");
-  menu.className = "dropdown-menu";
-  menu.setAttribute("role", "menu");
-  menu.style.display = "none";
-  menu.style.right = "0";
-  menu.style.left = "auto";
-  menu.style.minWidth = "380px";
-  menu.style.maxHeight = "420px";
-  menu.style.overflow = "auto";
-  menu.style.padding = "8px";
-
-  const statusLi = document.createElement("li");
-  statusLi.style.padding = "4px 6px 8px";
-  statusLi.innerHTML = '<strong style="font-size:12px;">Gomer Sheet Bridge Log</strong><div id="rw-queue-status" style="font-size:11px;color:#6b7280;margin-top:2px;">Queue</div>';
-
-  const bodyLi = document.createElement("li");
-  const body = document.createElement("div");
-  body.id = "rw-queue-body";
-  body.style.fontSize = "12px";
-  body.style.maxHeight = "330px";
-  body.style.overflow = "auto";
-  bodyLi.appendChild(body);
-
-  menu.appendChild(statusLi);
-  menu.appendChild(bodyLi);
-  btnGroup.appendChild(currentBtn);
-  btnGroup.appendChild(dropdownBtn);
-  btnGroup.appendChild(menu);
-  li.appendChild(btnGroup);
-  hostNav.insertBefore(li, hostNav.firstChild);
-
-  const toggleMenu = (e) => {
-    try {
-      e.preventDefault();
-      e.stopPropagation();
-      menu.style.display = menu.style.display === "none" ? "block" : "none";
-      if (menu.style.display === "none") {
-        btnGroup.classList.remove("open");
-      } else {
-        btnGroup.classList.add("open");
-      }
-    } catch (_) {}
-  };
-  currentBtn.onclick = toggleMenu;
-  dropdownBtn.onclick = toggleMenu;
-
-  document.addEventListener("click", (e) => {
-    if (!li.contains(e.target)) {
-      menu.style.display = "none";
-      btnGroup.classList.remove("open");
-    }
-  });
-
-  const isExtensionContextAlive = () => {
-    try {
-      return Boolean(chrome && chrome.runtime && chrome.runtime.id && chrome.storage && chrome.storage.local);
-    } catch (_) {
-      return false;
-    }
-  };
-
-  const escapeHtml = (value) =>
-    String(value || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-
-  let queueRenderTimer = null;
-  let lastQueueUpdatedAt = 0;
-  const render = () => {
-    try {
-      if (!isExtensionContextAlive()) {
-        if (queueRenderTimer) {
-          clearInterval(queueRenderTimer);
-          queueRenderTimer = null;
-        }
-        return;
-      }
-      try {
-        chrome.storage.local.get("rwExportQueueState", (data) => {
-          try {
-            if (!isExtensionContextAlive()) {
-              if (queueRenderTimer) {
-                clearInterval(queueRenderTimer);
-                queueRenderTimer = null;
-              }
-              return;
-            }
-            if (chrome.runtime && chrome.runtime.lastError) {
-              const msg = chrome.runtime.lastError.message || "";
-              if (msg.includes("Extension context invalidated") && queueRenderTimer) {
-                clearInterval(queueRenderTimer);
-                queueRenderTimer = null;
-              }
-              return;
-            }
-          } catch (_) {
-            if (queueRenderTimer) {
-              clearInterval(queueRenderTimer);
-              queueRenderTimer = null;
-            }
-            return;
-          }
-          const state = data && data.rwExportQueueState ? data.rwExportQueueState : null;
-          const statusEl = document.getElementById("rw-queue-status");
-          const bodyEl = document.getElementById("rw-queue-body");
-          if (!statusEl || !bodyEl) return;
-          if (!state || !Array.isArray(state.items) || state.items.length === 0) {
-            statusEl.textContent = "Queue: empty";
-            bodyEl.innerHTML = '<div style="color:#6b7280;">Пока нет задач.</div>';
-            return;
-          }
-          statusEl.textContent =
-            `pending ${state.pendingCount || 0} · ` +
-            `processing ${state.processingCount || 0} · ` +
-            `done ${state.doneCount || 0} · ` +
-            `error ${state.errorCount || 0} · ` +
-            `total ${state.totalCount || 0}`;
-          if (state.updatedAt && state.updatedAt !== lastQueueUpdatedAt) {
-            lastQueueUpdatedAt = state.updatedAt;
-            const latest = Array.isArray(state.items) && state.items.length ? state.items[state.items.length - 1] : null;
-            if (latest) {
-              console.log("[RW][QUEUE]", latest.status, latest.title || latest.id, latest.message || "");
-            } else {
-              console.log("[RW][QUEUE] state updated", state);
-            }
-          }
-          bodyEl.innerHTML = state.items
-            .slice()
-            .reverse()
-            .map((item) => {
-              const dt = item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString("ru-RU") : "";
-              const color =
-                item.status === "done" ? "#166534" :
-                item.status === "error" ? "#991b1b" :
-                item.status === "processing" ? "#1d4ed8" : "#6b7280";
-              const canKill = item.status === "pending" || item.status === "processing";
-              return `<div style="margin-bottom:8px;padding:8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;">
-                <div style="display:flex;justify-content:space-between;gap:8px;">
-                  <strong style="font-size:12px;">${escapeHtml(item.title || item.id)}</strong>
-                  <span style="font-size:11px;color:${color};">${escapeHtml(item.status)}</span>
-                </div>
-                <div style="font-size:11px;color:#4b5563;margin-top:4px;">${escapeHtml(item.message || "")}</div>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
-                  <div style="font-size:10px;color:#9ca3af;">${escapeHtml(dt)}</div>
-                  ${canKill ? `<button type="button" class="rw-queue-kill btn btn-xs btn-danger" data-task-id="${escapeHtml(item.id)}">Kill</button>` : ""}
-                </div>
-              </div>`;
-            })
-            .join("");
-        });
-      } catch (_) {
-        if (queueRenderTimer) {
-          clearInterval(queueRenderTimer);
-          queueRenderTimer = null;
-        }
-      }
-    } catch (_) {
-      if (queueRenderTimer) {
-        clearInterval(queueRenderTimer);
-        queueRenderTimer = null;
-      }
-    }
-  };
-
-  document.addEventListener("click", async (e) => {
-    const btn = e.target.closest(".rw-queue-kill");
-    if (!btn) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const taskId = (btn.getAttribute("data-task-id") || "").trim();
-    if (!taskId) return;
-    btn.disabled = true;
-    try {
-      await killExportTask(taskId);
-    } catch (error) {
-      console.error("[RW][QUEUE] kill failed", taskId, error?.message || error);
-      btn.disabled = false;
-    }
-  });
-
-  render();
-  queueRenderTimer = setInterval(render, 1500);
-}
 
 /** Перед переходом по ссылке на binding-attribute-page сохраняем номер заявки (делегированный клик на document). */
 function setupBindingLinkTaskSave() {
@@ -614,7 +209,9 @@ function setupBindingLinkTaskSave() {
         }
         if (row) {
           const requestCell = row.querySelector("td:nth-child(11)");
-          taskId = extractLastRequestId(requestCell || row);
+          let taskLink = requestCell ? requestCell.querySelector("a") : null;
+          if (!taskLink) taskLink = row.querySelector('a[href*="lisa/#/request/view"]');
+          taskId = taskLink ? (taskLink.textContent || "").trim().replace(/,/g, "") : "";
         }
       } else if (window.location.href.includes("/gomer/items/active/source/")) {
         sourceType = "active";
@@ -625,7 +222,7 @@ function setupBindingLinkTaskSave() {
         const taskEl = document.querySelector(
           "#itemsDetailsPjaxContainer > div.box > div.box-header.with-border > table > tbody > tr > td:nth-child(9) > a"
         ) || document.querySelector('a[href*="lisa/#/request/view"]');
-        taskId = taskEl ? extractLastRequestId(taskEl.parentElement || document) : "";
+        taskId = taskEl ? (taskEl.textContent || "").trim().replace(/,/g, "") : "";
       }
       
       // Сохраняем категорию, если есть селектор #w1 > tbody > tr:nth-child(5) > td > div > table > tbody > tr:nth-child(2) > td:nth-child(4) > a.glyphicon.glyphicon-th-list
@@ -676,7 +273,9 @@ function getCurrentProductData() {
   const row = getCurrentProductRow();
   if (!row) return null;
   const requestCell = row.querySelector("td:nth-child(11)");
-  const taskId = extractLastRequestId(requestCell || row);
+  let taskLink = requestCell ? requestCell.querySelector("a") : null;
+  if (!taskLink) taskLink = row.querySelector('td a[href*="lisa/#/request/view"]');
+  const taskId = taskLink ? (taskLink.textContent || "").trim().replace(/,/g, "") : "";
   const categoryCell = row.querySelector("td:nth-child(8)") || row.querySelector('td[data-col-seq="priceCategoryId"]');
   const categoryLink = categoryCell ? categoryCell.querySelector("a:nth-child(1)") || categoryCell.querySelector("a") : null;
   let categoryId = "";
@@ -748,9 +347,10 @@ function stripParamNameForPrice(value) {
   return withoutParen || s;
 }
 
-const ITEMS_SOURCE_BASE = "https://gomer.rozetka.company/gomer/items/source";
+const ON_MODERATION_BASE = "https://gomer.rozetka.company/gomer/items/on-moderation/source";
 const ACTIVE_BASE = "https://gomer.rozetka.company/gomer/items/active/source";
 const CHANGES_BASE = "https://gomer.rozetka.company/gomer/items/changes/source";
+const ITEMS_PER_PAGE = 500;
 
 /** ID текущего товара на item-details (для поиска в прайсе, когда on-moderation пустой). */
 function getCurrentItemOfferIdFromItemDetails() {
@@ -771,25 +371,29 @@ function getCurrentItemOfferIdFromItemDetails() {
 }
 
 /**
- * Собирает offerId со страницы items/source по sourceId, rz_category_id и номеру заявки (bpm_number).
- * URL: .../items/source/{sourceId}?...&rz_category_id=...&ItemSearch[bpm_number]=...
+ * Собирает offerId со всех страниц on-moderation по sourceId, rz_category_id и номеру заявки (bpm_number).
+ * URL: .../source/{sourceId}?page=...&per-page=10&size=500&ItemSearch[bpm_number]=...&rz_category_id=...
+ * 500 товаров на странице — totalPages = ceil(totalCount / 500).
  */
 async function collectOfferIdsFromOnModeration(sourceId, categoryId, taskId, anchor) {
   const offerIds = [];
-  const pageUrl = () => {
+  const pageUrl = (page) => {
     const params = new URLSearchParams({
+      page: String(page),
+      "per-page": "10",
+      size: "500",
       "ItemSearch[id]": "",
       "ItemSearch[name]": "",
       "ItemSearch[sync_source_vendors_id]": "",
+      "ItemSearch[available]": "",
+      "ItemSearch[bpm_number]": taskId || "", // Используем номер заявки для сбора offerIds с модерации
+      "ItemSearch[moderation_type]": "",
       sort: "",
       sync_source_category_id: "",
       rz_category_id: categoryId || "",
-      "ItemSearch[upload_status]": "",
-      "ItemSearch[available]": "",
-      "ItemSearch[bpm_number]": taskId || "",
-      "ItemSearch[moderation_type]": ""
+      reason_id: ""
     });
-    return `${ITEMS_SOURCE_BASE}/${sourceId}?${params.toString()}`;
+    return `${ON_MODERATION_BASE}/${sourceId}?${params.toString()}`;
   };
 
   function parseOfferIdsFromDoc(document) {
@@ -826,17 +430,50 @@ async function collectOfferIdsFromOnModeration(sourceId, categoryId, taskId, anc
     return ids;
   }
 
-  const url = pageUrl();
-  const res = await fetch(url, { credentials: "include" });
+  const firstUrl = pageUrl(1);
+  const res = await fetch(firstUrl, { credentials: "include" });
   if (!res.ok) {
-    console.error("[RW] collectOfferIds: ошибка, url=", url, "status=", res.status);
-    throw new Error("Не удалось загрузить страницу items/source: " + res.status + " " + url);
+    console.error("[RW] collectOfferIds: 404 или ошибка, url=", firstUrl, "status=", res.status);
+    throw new Error("Не удалось загрузить страницу on-moderation: " + res.status + " " + firstUrl);
   }
   const html = await res.text();
   const doc = new DOMParser().parseFromString(html, "text/html");
 
   offerIds.push(...parseOfferIdsFromDoc(doc));
-  console.log("[RW] collectOfferIds: url=", url, "собрано строк=", offerIds.length, "примеры id=", offerIds.slice(0, 3));
+  console.log("[RW] collectOfferIds: страница 1, собрано строк=", offerIds.length, "примеры id=", offerIds.slice(0, 3));
+
+  const totalCountSelectors = [
+    "#items_summary_container > div.summary_container_content > div.selected_summary > strong.selected_rows_total",
+    "strong.selected_rows_total",
+    ".selected_summary strong",
+    "[class*='selected_rows_total']"
+  ];
+  let totalCount = 0;
+  for (const sel of totalCountSelectors) {
+    const totalEl = doc.querySelector(sel);
+    if (totalEl) {
+      totalCount = parseInt(totalEl.textContent.trim(), 10) || 0;
+      if (totalCount > 0) break;
+    }
+  }
+  const totalPages = totalCount > 0 ? Math.ceil(totalCount / 500) || 1 : 1;
+  console.log("[RW] collectOfferIds: url=", pageUrl(1), "totalCount=", totalCount, "totalPages=", totalPages, "уже собрано=", offerIds.length);
+
+  for (let page = 2; page <= totalPages; page += 1) {
+    const pageU = pageUrl(page);
+    const r = await fetch(pageU, { credentials: "include" });
+    if (!r.ok) {
+      console.warn("[RW] collectOfferIds: страница", page, "ошибка", r.status, "url=", pageU);
+      break;
+    }
+    const h = await r.text();
+    const d = new DOMParser().parseFromString(h, "text/html");
+    const pageIds = parseOfferIdsFromDoc(d);
+    offerIds.push(...pageIds);
+    console.log("[RW] collectOfferIds: страница", page, "добавлено=", pageIds.length, "всего=", offerIds.length);
+  }
+
+  console.log("[RW] collectOfferIds: итого offerIds=", offerIds.length);
   return offerIds;
 }
 
@@ -1027,7 +664,7 @@ function findOfferInPriceFeed(priceUrl, paramName, paramValue, offerIds, categor
   });
 }
 
-async function buildProductLinkFromPrice({ categoryId, taskId, useTaskIdForOfferSelection = true, paramName, value, anchor }) {
+async function buildProductLinkFromPrice({ categoryId, taskId, paramName, value, anchor }) {
   const isItemDetails = window.location.href.includes("/gomer/items/item-details/source/");
   const isActivePage = window.location.href.includes("/gomer/items/active/source/");
   const isChangesPage = window.location.href.includes("/gomer/items/changes/source/");
@@ -1038,7 +675,7 @@ async function buildProductLinkFromPrice({ categoryId, taskId, useTaskIdForOffer
   }
   const sourceId = getSourceIdFromUrl(window.location.href);
   let taskIdToUse = (taskId || "").trim();
-  if (useTaskIdForOfferSelection && !taskIdToUse) taskIdToUse = getTaskIdFromCurrentPage();
+  if (!taskIdToUse) taskIdToUse = getTaskIdFromCurrentPage();
   const paramNameForPrice = stripParamNameForPrice(paramName || "");
   let categoryIdForOnModeration = (categoryId || "").trim();
   let categoryIdForPrice = "";
@@ -1054,7 +691,7 @@ async function buildProductLinkFromPrice({ categoryId, taskId, useTaskIdForOffer
     return { url: "", toast: errorToast, found: false };
   }
   if (categoryIdForPrice && !categoryIdForOnModeration) categoryIdForOnModeration = categoryIdForPrice;
-  console.log("[RW] buildProductLink: url=", window.location.href, "sourceId=", sourceId, "rz_category_on_moderation=", categoryIdForOnModeration, "rz_category_for_price=", categoryIdForPrice || "(нет)", "bpm_number=", taskIdToUse, "useTaskIdForOfferSelection=", useTaskIdForOfferSelection, "paramName=", paramNameForPrice, "value=", JSON.stringify((value || "").slice(0, 80)));
+  console.log("[RW] buildProductLink: url=", window.location.href, "sourceId=", sourceId, "rz_category_on_moderation=", categoryIdForOnModeration, "rz_category_for_price=", categoryIdForPrice || "(нет)", "bpm_number=", taskIdToUse, "paramName=", paramNameForPrice, "value=", JSON.stringify((value || "").slice(0, 80)));
   if (!sourceId) {
     const errorToast = showToast("Не удалось найти sourceId", anchor, "error", 0);
     return { url: "", toast: errorToast, found: false };
@@ -1196,7 +833,7 @@ function showToast(message, anchor, type = "success", duration = 1500) {
   toast.textContent = message;
   toast.style.position = "fixed";
   toast.style.zIndex = 999999;
-  toast.style.background = type === "error" ? "#c0392b" : type === "warning" ? "#b7791f" : "#1f8f4d";
+  toast.style.background = type === "error" ? "#c0392b" : "#1f8f4d";
   toast.style.color = "#ffffff";
   toast.style.padding = "6px 10px";
   toast.style.borderRadius = "6px";
@@ -1317,7 +954,7 @@ function createBlockButton(row) {
       return;
     }
 
-    chrome.storage.sync.get(["sheetUrl", SETTINGS_USE_TASK_FILTER_KEY, SETTINGS_CUSTOM_TASK_ID_KEY, SETTINGS_GENERATE_PRODUCT_LINK_KEY], async (data) => {
+    chrome.storage.sync.get("sheetUrl", async (data) => {
       if (!data.sheetUrl) {
         showToast("Сначала вставь ссылку на таблицу", btn, "error");
         return;
@@ -1327,7 +964,7 @@ function createBlockButton(row) {
         const timestamp = new Date().toLocaleString("ru-RU");
         const links = buildValueWithLink(valueForFile);
         const valueLink = typeof links === "string" ? links : links.valueLink;
-        const productLink = typeof links === "string" ? "" : links.productLink;
+        let productLink = typeof links === "string" ? "" : links.productLink;
 
         let taskId = isItemDetails
           ? (() => {
@@ -1338,10 +975,6 @@ function createBlockButton(row) {
             })()
           : (productData ? productData.taskId : "");
         if (!taskId) taskId = getTaskIdFromCurrentPage();
-        taskId = normalizeTaskId(taskId);
-        const customTaskId = normalizeTaskId(data[SETTINGS_CUSTOM_TASK_ID_KEY]);
-        const useTaskIdForOfferSelection = resolveUseTaskFilter(data[SETTINGS_USE_TASK_FILTER_KEY]);
-        const generateProductLink = resolveGenerateProductLink(data[SETTINGS_GENERATE_PRODUCT_LINK_KEY]);
         
         // Если на странице параметров и нет taskId из DOM, читаем из storage
         const isBindingPage = window.location.href.includes("/gomer/sellers/attributes/binding-attribute-page/source/");
@@ -1349,7 +982,7 @@ function createBlockButton(row) {
           const storageData = await new Promise(resolve => {
             chrome.storage.sync.get([BINDING_TASK_ID_KEY, BINDING_CATEGORY_ID_KEY], resolve);
           });
-          taskId = normalizeTaskId(storageData[BINDING_TASK_ID_KEY]);
+          taskId = (storageData[BINDING_TASK_ID_KEY] || "").trim();
           // Если категория не найдена в DOM, используем сохраненную из storage
           if (!categoryId && storageData[BINDING_CATEGORY_ID_KEY]) {
             categoryId = (storageData[BINDING_CATEGORY_ID_KEY] || "").trim();
@@ -1359,28 +992,38 @@ function createBlockButton(row) {
         }
 
         const hasCategoryId = Boolean(categoryId);
-        let taskIdForFields = customTaskId || taskId;
-        const taskIdForOfferSelection = useTaskIdForOfferSelection ? taskIdForFields : "";
-        if (useTaskIdForOfferSelection && customTaskId) {
-          showTaskFilterWarning(btn, customTaskId);
+        let taskIdForFields = taskId;
+        let priceResult = null;
+        if (hasCategoryId) {
+          const attrTitleEl = document.querySelector("#syncsourceattribute-title");
+          const attrTitleRaw = attrTitleEl
+            ? (attrTitleEl.value || attrTitleEl.getAttribute("value") || "")
+            : "";
+          const paramName = stripIdFromText(attrTitleRaw);
+          if (!paramName) {
+            showToast("Не найдено название параметра (#syncsourceattribute-title)", btn, "error");
+            return;
+          }
+          priceResult = await buildProductLinkFromPrice({
+            categoryId,
+            taskId,
+            paramName,
+            value: valueForPrice,
+            anchor: btn
+          });
+          if (!priceResult.found) {
+            // Товар не найден в прайсе или прайс недоступен
+            // Если есть taskId из результата (например, когда прайс недоступен) - используем его
+            // Иначе сохраняем taskId, который был установлен выше (не сбрасываем в пустую строку)
+            if (priceResult.taskId) {
+              taskIdForFields = priceResult.taskId;
+            }
+            // taskIdForFields уже установлен из taskId выше, не сбрасываем его
+            productLink = ""; // Явно очищаем ссылку на товар
+          } else if (priceResult.url) {
+            productLink = { text: "Ссылка", url: priceResult.url };
+          }
         }
-        const attrTitleEl = document.querySelector("#syncsourceattribute-title");
-        const attrTitleRaw = attrTitleEl
-          ? (attrTitleEl.value || attrTitleEl.getAttribute("value") || "")
-          : "";
-        const paramName = stripIdFromText(attrTitleRaw);
-        if (!paramName) {
-          showToast("Не найдено название параметра (#syncsourceattribute-title)", btn, "error");
-          return;
-        }
-        const sourceId = getSourceIdFromUrl(window.location.href);
-        if (!sourceId) {
-          showToast("Не удалось найти sourceId", btn, "error");
-          return;
-        }
-        const { priceUrl, priceLinkTitle } = getPriceLinkMeta(sourceId);
-        const sourceType = await resolveSourceTypeForQueue();
-        const categoryIdForPrice = isItemDetails ? getCategoryIdForPriceFromItemDetails() : "";
 
         const fields = {
           "Дата добавления": timestamp,
@@ -1390,24 +1033,44 @@ function createBlockButton(row) {
           "Номер задачи": taskIdForFields,
           "Ссылка на товар": productLink
         };
-        await enqueueExportTask({
-          sheetUrl: data.sheetUrl,
-          sourceId,
-          sourceType,
-          sourceOrigin: window.location.origin,
-          categoryIdForOnModeration: categoryId || "",
-          categoryIdForPrice: categoryIdForPrice || "",
-          taskIdForOfferSelection,
-          useTaskIdForOfferSelection,
-          generateProductLink,
-          paramNameForPrice: stripParamNameForPrice(paramName),
-          valueForPrice,
-          priceUrl,
-          priceLinkTitle,
-          restorePageSizeUrl: buildRestorePageSizeUrl(sourceId, sourceType, categoryId || "", taskIdForOfferSelection),
-          fields
-        });
-        showToast("Задача добавлена в очередь", btn, "success", 1700);
+        let addToast = null;
+        if (hasCategoryId && priceResult && priceResult.toast && priceResult.toast.parentNode) {
+          // Переиспользуем тост из buildProductLinkFromPrice
+          addToast = priceResult.toast;
+          // Если товар не найден, тост уже показывает сообщение об ошибке (красный)
+          // Теперь меняем на этап добавления в файл
+          if (!priceResult.found) {
+            // Небольшая задержка перед переходом к следующему этапу
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          addToast.textContent = "Добавление значения в файл";
+          addToast.style.background = "#1f8f4d";
+        } else {
+          addToast = showToast("Добавление значения в файл", btn, "success", 0);
+        }
+        const result = await appendFields(data.sheetUrl, fields);
+        if (!result || !result.updates) {
+          if (addToast && addToast.parentNode) {
+            addToast.textContent = "Ошибка: ответ без updates";
+            addToast.style.background = "#c0392b";
+            setTimeout(() => {
+              if (addToast.parentNode) addToast.remove();
+            }, 2000);
+          } else {
+            showToast("Ответ без updates", btn, "error");
+          }
+          return;
+        }
+
+        if (addToast && addToast.parentNode) {
+          addToast.textContent = "Добавление значения в файл — Добавленно";
+          addToast.style.background = "#1f8f4d";
+          setTimeout(() => {
+            if (addToast.parentNode) addToast.remove();
+          }, 1500);
+        } else {
+          showToast("Добавление значения в файл — Добавленно", btn);
+        }
       } catch (error) {
         showToast(error.message || "Ошибка авторизации", btn, "error");
       }
@@ -1502,7 +1165,7 @@ function createTableButton(cell) {
       return;
     }
 
-    chrome.storage.sync.get(["sheetUrl", BINDING_TASK_ID_KEY, BINDING_CATEGORY_ID_KEY, SETTINGS_USE_TASK_FILTER_KEY, SETTINGS_CUSTOM_TASK_ID_KEY, SETTINGS_GENERATE_PRODUCT_LINK_KEY], async (data) => {
+    chrome.storage.sync.get(["sheetUrl", BINDING_TASK_ID_KEY, BINDING_CATEGORY_ID_KEY], async (data) => {
       if (!data.sheetUrl) {
         showToast("Сначала вставь ссылку на таблицу", btn, "error");
         return;
@@ -1512,18 +1175,8 @@ function createTableButton(cell) {
         const timestamp = new Date().toLocaleString("ru-RU");
         const links = buildValueWithLink(valueForFile);
         const valueLink = typeof links === "string" ? links : links.valueLink;
-        const productLink = typeof links === "string" ? "" : links.productLink;
-        let taskIdForFields = normalizeTaskId(data[BINDING_TASK_ID_KEY]);
-        const customTaskId = normalizeTaskId(data[SETTINGS_CUSTOM_TASK_ID_KEY]);
-        const useTaskIdForOfferSelection = resolveUseTaskFilter(data[SETTINGS_USE_TASK_FILTER_KEY]);
-        const generateProductLink = resolveGenerateProductLink(data[SETTINGS_GENERATE_PRODUCT_LINK_KEY]);
-        if (customTaskId) {
-          taskIdForFields = customTaskId;
-        }
-        const taskIdForOfferSelection = useTaskIdForOfferSelection ? taskIdForFields : "";
-        if (useTaskIdForOfferSelection && customTaskId) {
-          showTaskFilterWarning(btn, customTaskId);
-        }
+        let productLink = typeof links === "string" ? "" : links.productLink;
+        let taskIdForFields = (data[BINDING_TASK_ID_KEY] || "").trim();
         console.log("[RW] createTableButton: прочитан номер заявки из storage, taskId=", taskIdForFields, "data[BINDING_TASK_ID_KEY]=", data[BINDING_TASK_ID_KEY]);
         
         // Если категория не найдена в DOM, используем сохраненную из storage
@@ -1532,21 +1185,41 @@ function createTableButton(cell) {
           finalCategoryId = (data[BINDING_CATEGORY_ID_KEY] || "").trim();
           console.log("[RW] createTableButton: прочитана категория из storage, categoryId=", finalCategoryId);
         }
-        if (window.location.href.includes("/gomer/sellers/attributes/binding-attribute-page/source/")) {
-          const attrFromBinding = document.querySelector("#pv_id_7 > span > div");
-          const attrText = attrFromBinding ? (attrFromBinding.textContent || "").trim() : "";
-          const cleaned = stripIdFromText(attrText);
-          if (cleaned) {
-            paramName = stripParamNameForPrice(cleaned);
+        
+        let priceResult = null;
+        if (finalCategoryId) {
+          // На странице binding-attribute-page иногда нужен "реальный" paramName
+          if (window.location.href.includes("/gomer/sellers/attributes/binding-attribute-page/source/")) {
+            const attrFromBinding = document.querySelector("#pv_id_7 > span > div");
+            const attrText = attrFromBinding ? (attrFromBinding.textContent || "").trim() : "";
+            const cleaned = stripIdFromText(attrText);
+            if (cleaned) {
+              paramName = stripParamNameForPrice(cleaned);
+            }
+          }
+          console.log("[RW] createTableButton: paramNameForPrice=", JSON.stringify(paramName));
+          // valueForPrice уже обработан через extractRuValue выше (кавычки уже убраны)
+          console.log("[RW] createTableButton: valueForPrice=", JSON.stringify(valueForPrice), "length=", valueForPrice ? valueForPrice.length : 0);
+          priceResult = await buildProductLinkFromPrice({
+            categoryId: finalCategoryId,
+            taskId: taskIdForFields,
+            paramName,
+            value: valueForPrice,
+            anchor: btn
+          });
+          if (!priceResult.found) {
+            // Товар не найден в прайсе или прайс недоступен
+            // Если есть taskId из результата (например, когда прайс недоступен) - используем его
+            // Иначе сохраняем taskId, который был прочитан из storage (не сбрасываем в пустую строку)
+            if (priceResult.taskId) {
+              taskIdForFields = priceResult.taskId;
+            }
+            // taskIdForFields уже установлен из storage выше, не сбрасываем его
+            productLink = ""; // Явно очищаем ссылку на товар
+          } else if (priceResult.url) {
+            productLink = { text: "Ссылка", url: priceResult.url };
           }
         }
-        const sourceId = getSourceIdFromUrl(window.location.href);
-        if (!sourceId) {
-          showToast("Не удалось найти sourceId", btn, "error");
-          return;
-        }
-        const { priceUrl, priceLinkTitle } = getPriceLinkMeta(sourceId);
-        const sourceType = await resolveSourceTypeForQueue();
 
         const fields = {
           "Дата добавления": timestamp,
@@ -1556,24 +1229,44 @@ function createTableButton(cell) {
           "Номер задачи": taskIdForFields,
           "Ссылка на товар": productLink
         };
-        await enqueueExportTask({
-          sheetUrl: data.sheetUrl,
-          sourceId,
-          sourceType,
-          sourceOrigin: window.location.origin,
-          categoryIdForOnModeration: finalCategoryId || "",
-          categoryIdForPrice: "",
-          taskIdForOfferSelection,
-          useTaskIdForOfferSelection,
-          generateProductLink,
-          paramNameForPrice: stripParamNameForPrice(paramName),
-          valueForPrice,
-          priceUrl,
-          priceLinkTitle,
-          restorePageSizeUrl: buildRestorePageSizeUrl(sourceId, sourceType, finalCategoryId || "", taskIdForOfferSelection),
-          fields
-        });
-        showToast("Задача добавлена в очередь", btn, "success", 1700);
+        let addToast = null;
+        if (priceResult && priceResult.toast && priceResult.toast.parentNode) {
+          // Переиспользуем тост из buildProductLinkFromPrice
+          addToast = priceResult.toast;
+          // Если товар не найден, тост уже показывает сообщение об ошибке (красный)
+          // Теперь меняем на этап добавления в файл
+          if (!priceResult.found) {
+            // Небольшая задержка перед переходом к следующему этапу
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          addToast.textContent = "Добавление значения в файл";
+          addToast.style.background = "#1f8f4d";
+        } else {
+          addToast = showToast("Добавление значения в файл", btn, "success", 0);
+        }
+        const result = await appendFields(data.sheetUrl, fields);
+        if (!result || !result.updates) {
+          if (addToast && addToast.parentNode) {
+            addToast.textContent = "Ошибка: ответ без updates";
+            addToast.style.background = "#c0392b";
+            setTimeout(() => {
+              if (addToast.parentNode) addToast.remove();
+            }, 2000);
+          } else {
+            showToast("Ответ без updates", btn, "error");
+          }
+          return;
+        }
+
+        if (addToast && addToast.parentNode) {
+          addToast.textContent = "Добавление значения в файл — Добавленно";
+          addToast.style.background = "#1f8f4d";
+          setTimeout(() => {
+            if (addToast.parentNode) addToast.remove();
+          }, 1500);
+        } else {
+          showToast("Добавление значения в файл — Добавленно", btn);
+        }
       } catch (error) {
         showToast(error.message || "Ошибка авторизации", btn, "error");
       }
@@ -1670,7 +1363,6 @@ function observePagination() {
 }
 
 function initButtons() {
-  initQueuePanel();
   addButtonsToBlocks();
   observePagination();
   trackModalOpener();

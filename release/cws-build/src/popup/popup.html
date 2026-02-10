@@ -46,40 +46,6 @@
         border-color: #2563eb;
         box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
       }
-      .checkbox-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin: 4px 0 10px;
-      }
-      .checkbox-row input[type="checkbox"] {
-        width: 14px;
-        height: 14px;
-        margin: 0;
-        padding: 0;
-        border: 1px solid #d1d5db;
-        border-radius: 4px;
-        box-shadow: none;
-      }
-      .checkbox-row label {
-        margin: 0;
-        font-size: 12px;
-        color: #374151;
-      }
-      .warning {
-        display: none;
-        margin: -4px 0 10px;
-        padding: 8px 10px;
-        border-radius: 8px;
-        border: 1px solid #f2c97d;
-        background: #fff7e6;
-        color: #8a5b00;
-        font-size: 12px;
-        line-height: 1.35;
-      }
-      .warning.show {
-        display: block;
-      }
       button {
         width: 100%;
         padding: 8px 10px;
@@ -102,19 +68,6 @@
       <p class="hint">Сохраняем ссылку на вашу таблицу</p>
       <label for="sheetUrl">Ссылка на Google Sheet</label>
       <input id="sheetUrl" placeholder="Вставьте ссылку на таблицу" />
-      <div class="checkbox-row">
-        <input id="useTaskIdForOfferSelection" type="checkbox" checked />
-        <label for="useTaskIdForOfferSelection">Учитывать номер заявки при выборке offerId</label>
-      </div>
-      <div class="checkbox-row">
-        <input id="generateProductLink" type="checkbox" checked />
-        <label for="generateProductLink">Генерировать ссылку на товар</label>
-      </div>
-      <label for="customTaskId">Свой номер заявки (опционально)</label>
-      <input id="customTaskId" placeholder="Например: 123456" />
-      <div id="taskFilterWarning" class="warning">
-        Внимание: включен фильтр по номеру заявки. По указанному номеру заявки должны быть товары.
-      </div>
       <button id="save">Сохранить</button>
     </div>
     <script src="popup.js"></script>
