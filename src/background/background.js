@@ -200,14 +200,46 @@ function decodeXmlEntities(value) {
     .replace(/&#(\d+);/g, (_, code) => {
       const n = Number(code);
       return Number.isFinite(n) ? String.fromCharCode(n) : _;
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
+      const n = Number.parseInt(hex, 16);
+      return Number.isFinite(n) ? String.fromCharCode(n) : _;
     });
 }
 
+function extractComparableParamValue(rawValue) {
+  const src = String(rawValue || "");
+  if (!src) return "";
+
+  const pickTaggedValue = (lang) => {
+    const re = new RegExp(`<value\\s+[^>]*lang=(["'])${lang}\\1[^>]*>([\\s\\S]*?)<\\/value>`, "i");
+    const m = src.match(re);
+    return m ? m[2] : "";
+  };
+
+  const ru = pickTaggedValue("ru");
+  if (ru) return ru;
+  const uk = pickTaggedValue("uk");
+  if (uk) return uk;
+  const anyValueMatch = src.match(/<value(?:\s+[^>]*)?>([\s\S]*?)<\/value>/i);
+  if (anyValueMatch && anyValueMatch[1]) return anyValueMatch[1];
+
+  // plain <param>text</param> fallback
+  return src.replace(/<[^>]+>/g, " ");
+}
+
 function normalizeParamValue(value) {
-  let v = String(value || "");
+  let v = extractComparableParamValue(value);
   v = stripCdata(v);
   v = decodeXmlEntities(v);
-  v = v.replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
+  v = v
+    .replace(/\u00A0/g, " ")
+    .replace(/[‐‑‒–—]/g, "-")
+    .replace(/℃/g, "°c")
+    .replace(/°\s*c/gi, "°c")
+    .replace(/\s*-\s*/g, " - ")
+    .replace(/\s+/g, " ")
+    .trim();
   if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
     v = v.slice(1, -1).trim();
   }
@@ -233,13 +265,17 @@ function offerMatchesCategoryAndParam(offerXml, categoryId, paramName, paramValu
   return normalizeParamValue(value) === normalizeParamValue(paramValue);
 }
 
+function extractOfferIdFromXmlTag(offerXml) {
+  const m = offerXml.match(/<offer\b[^>]*\bid=(["'])([^"']+)\1/i);
+  return m ? String(m[2] || "").trim() : "";
+}
+
 // Проверка: оффер в списке offerIds и имеет параметр paramName = paramValue.
 function offerMatchesIdsAndParam(offerXml, offerIdsSet, paramName, paramValue) {
   // Сначала быстро проверяем ID (это быстрее чем парсить параметры)
-  const idMatch = offerXml.match(/<offer\s+[^>]*\bid="([^"]+)"/) || offerXml.match(/<offer\s+id="([^"]+)"/);
-  if (!idMatch) return false;
-  const idNorm = idMatch[1].trim().toLowerCase();
-  const offerId = idMatch[1].trim();
+  const offerId = extractOfferIdFromXmlTag(offerXml);
+  if (!offerId) return false;
+  const idNorm = offerId.toLowerCase();
   if (!offerIdsSet.has(idNorm)) return false; // Ранний выход если ID не в списке
 
   if (_lastOfferDebug) _lastOfferDebug.offerIdMatched += 1;
@@ -364,9 +400,29 @@ function offerMatchesIdsAndParam(offerXml, offerIdsSet, paramName, paramValue) {
   return matches;
 }
 
+// Fallback: проверяем только совпадение значения в любом <param> у оффера из списка offerIds.
+function offerMatchesIdsAndAnyParamValue(offerXml, offerIdsSet, paramValue) {
+  const offerId = extractOfferIdFromXmlTag(offerXml);
+  if (!offerId) return false;
+  const idNorm = offerId.toLowerCase();
+  if (!offerIdsSet.has(idNorm)) return false;
+
+  const searchValue = normalizeParamValue(paramValue);
+  const paramRegex = /<param\s+name=(["'])(.*?)\1[^>]*>([\s\S]*?)<\/param>/g;
+  let match = null;
+  while ((match = paramRegex.exec(offerXml)) !== null) {
+    const raw = match[3] || "";
+    const val = normalizeParamValue(raw);
+    if (val === searchValue) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function getOfferIdFromXml(offerXml) {
-  const m = offerXml.match(/<offer\s+[^>]*\bid="([^"]+)"/) || offerXml.match(/<offer\s+id="([^"]+)"/);
-  return m ? m[1] : null;
+  const id = extractOfferIdFromXmlTag(offerXml);
+  return id || null;
 }
 
 /** Поиск в указанном диапазоне байт. */
@@ -436,9 +492,9 @@ async function findOfferInRange(url, offerIdsSet, paramName, paramValue, startBy
         offersChecked++;
 
         // Проверяем ID
-        const idMatch = offerXml.match(/<offer\s+[^>]*\bid="([^"]+)"/) || offerXml.match(/<offer\s+id="([^"]+)"/);
-        if (idMatch) {
-          const idNorm = idMatch[1].trim().toLowerCase();
+        const parsedOfferId = extractOfferIdFromXmlTag(offerXml);
+        if (parsedOfferId) {
+          const idNorm = parsedOfferId.toLowerCase();
           if (offerIdsSet.has(idNorm)) {
             offersWithMatchingId++;
             // Если ID совпал, проверяем параметр
@@ -655,9 +711,9 @@ async function findOfferByOfferIdsAndParam(url, offerIds, paramName, paramValue,
         offersChecked++;
 
         // Проверяем ID
-        const idMatch = offerXml.match(/<offer\s+[^>]*\bid="([^"]+)"/) || offerXml.match(/<offer\s+id="([^"]+)"/);
-        if (idMatch) {
-          const idNorm = idMatch[1].trim().toLowerCase();
+        const parsedOfferId = extractOfferIdFromXmlTag(offerXml);
+        if (parsedOfferId) {
+          const idNorm = parsedOfferId.toLowerCase();
           if (offerIdsSet.has(idNorm)) {
             offersWithMatchingId++;
             // Если ID совпал, проверяем параметр
@@ -681,6 +737,62 @@ async function findOfferByOfferIdsAndParam(url, offerIds, paramName, paramValue,
   }
 
   console.log("[RW] findOfferByOfferIds: товар не найден в прайсе. Проверено офферов=", offersChecked, "с совпадающим ID=", offersWithMatchingId, "paramName=", paramName, "paramValue=", JSON.stringify(paramValue));
+
+  // Fallback-проход: если имя параметра не совпадает в источниках, ищем по значению
+  // среди тех же offerIds.
+  console.warn("[RW] findOfferByOfferIds: fallback to value-only search for matched offerIds");
+  const response2 = await fetch(url, { signal: taskSignal });
+  if (!response2.ok || !response2.body) {
+    return null;
+  }
+  const reader2 = response2.body.getReader();
+  const decoder2 = new TextDecoder();
+  let buffer2 = "";
+  const MAX_TAIL2 = 50000;
+  const MIN_BUFFER2 = 10485760;
+  try {
+    let eof2 = false;
+    while (true) {
+      while (!eof2) {
+        const { done, value } = await reader2.read();
+        if (done) {
+          eof2 = true;
+          break;
+        }
+        buffer2 += decoder2.decode(value, { stream: true });
+        if (buffer2.length >= MIN_BUFFER2 || buffer2.includes("</offer>")) {
+          break;
+        }
+      }
+
+      for (;;) {
+        const start = buffer2.indexOf("<offer");
+        if (start === -1) break;
+        const end = buffer2.indexOf("</offer>", start);
+        if (end === -1) {
+          if (eof2) break;
+          break;
+        }
+
+        const offerXml = buffer2.slice(start, end + 8);
+        buffer2 = buffer2.slice(end + 8);
+        if (offerMatchesIdsAndAnyParamValue(offerXml, offerIdsSet, paramValue)) {
+          const foundId = getOfferIdFromXml(offerXml);
+          console.log("[RW] findOfferByOfferIds: fallback matched by value-only, offerId=", foundId);
+          reader2.cancel();
+          return foundId;
+        }
+      }
+
+      if (buffer2.length > MAX_TAIL2) buffer2 = buffer2.slice(-MAX_TAIL2);
+      if (eof2) break;
+    }
+  } finally {
+    try {
+      reader2.releaseLock();
+    } catch (_) {}
+  }
+
   return null;
 }
 

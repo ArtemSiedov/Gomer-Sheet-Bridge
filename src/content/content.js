@@ -32,6 +32,15 @@ function getSourceIdFromUrl(url) {
   return id || "";
 }
 
+function isBindingAttributePageUrl(url) {
+  try {
+    const u = new URL(String(url || window.location.href), window.location.origin);
+    return u.pathname.includes("/gomer/sellers/attributes/binding-attribute-page/source/");
+  } catch (_) {
+    return String(url || window.location.href).includes("/gomer/sellers/attributes/binding-attribute-page/source/");
+  }
+}
+
 function getCategoryIdFromCurrentPage() {
   const u = new URL(window.location.href);
   let id = u.searchParams.get("rz_category_id") || u.searchParams.get("sync_source_category_id") || "";
@@ -290,7 +299,7 @@ function detectSourceTypeByUrl(url) {
 }
 
 async function resolveSourceTypeForQueue() {
-  if (window.location.href.includes("/gomer/sellers/attributes/binding-attribute-page/source/")) {
+  if (isBindingAttributePageUrl(window.location.href)) {
     const storageData = await new Promise((resolve) => {
       chrome.storage.sync.get([BINDING_SOURCE_PAGE_KEY], resolve);
     });
@@ -1530,7 +1539,7 @@ function createTableButton(cell) {
     const value = extractRuValue(rawValue);
     console.log("[RW] createTableButton: rawValue=", JSON.stringify(rawValue), "value=", JSON.stringify(value));
     
-    const isBindingPage = window.location.href.includes("/gomer/sellers/attributes/binding-attribute-page/source/");
+    const isBindingPage = isBindingAttributePageUrl(window.location.href);
     // Для binding-page: если есть выделенные строки p-highlight, берем все их значения.
     // Иначе работаем как раньше по текущей строке.
     const selectedValue = getSelectedTextFromInput(valueEl);
@@ -1580,12 +1589,13 @@ function createTableButton(cell) {
           finalCategoryId = (data[BINDING_CATEGORY_ID_KEY] || "").trim();
           console.log("[RW] createTableButton: прочитана категория из storage, categoryId=", finalCategoryId);
         }
-        if (window.location.href.includes("/gomer/sellers/attributes/binding-attribute-page/source/")) {
+        if (isBindingAttributePageUrl(window.location.href)) {
           const attrFromBinding = document.querySelector("#pv_id_7 > span > div");
           const attrText = attrFromBinding ? (attrFromBinding.textContent || "").trim() : "";
+          // Для поиска в прайсе берем имя параметра именно из #pv_id_7 (без id в скобках).
           const cleaned = stripIdFromText(attrText);
           if (cleaned) {
-            paramName = stripParamNameForPrice(cleaned);
+            paramName = cleaned;
           }
         }
         const sourceId = getSourceIdFromUrl(window.location.href);
@@ -1622,7 +1632,7 @@ function createTableButton(cell) {
               taskIdForOfferSelection,
               useTaskIdForOfferSelection,
               generateProductLink,
-              paramNameForPrice: stripParamNameForPrice(paramName),
+              paramNameForPrice: String(paramName || "").trim(),
               valueForPrice,
               priceUrl,
               priceLinkTitle,
@@ -1631,7 +1641,7 @@ function createTableButton(cell) {
               fields
             });
             enqueuedCount += 1;
-            console.log("[RW] enqueue selected value:", valueForFile, "taskIdForFields=", taskIdForFields);
+            console.log("[RW] enqueue selected value:", valueForFile, "paramNameForPrice=", String(paramName || "").trim(), "taskIdForFields=", taskIdForFields);
           } catch (enqueueError) {
             enqueueErrors += 1;
             console.error("[RW] enqueue failed for selected value:", valueForFile, enqueueError?.message || enqueueError);
@@ -1687,7 +1697,7 @@ function observeTableAjax() {
 
 
 function applyFilterFromUrl() {
-  if (!window.location.href.includes("/gomer/sellers/attributes/binding-attribute-page/source/")) {
+  if (!isBindingAttributePageUrl(window.location.href)) {
     return;
   }
   const filterApplied = document.body.getAttribute("data-rw-filter-applied") === "1";
@@ -1748,7 +1758,7 @@ function initButtons() {
   trackModalOpener();
   setupBindingLinkTaskSave();
   setupBindingLinkTaskSaveFromOnModeration();
-  if (window.location.href.includes("/gomer/sellers/attributes/binding-attribute-page/source/")) {
+  if (isBindingAttributePageUrl(window.location.href)) {
     addButtonsToTable();
     observeTableAjax();
   }
