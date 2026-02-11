@@ -13,7 +13,6 @@
   "background": {
     "service_worker": "src/background/background.js"
   },
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvjU1N5t9/BWIxNyI+FbzPA65gw/uBasCB8rB1HV/wazZT0UsRPYjyeb22BBYMCxd38g20bnsf3/gTuG/PveE4p8piAUb7KDkSV026CNjpIU4QDRph71Qk4HkRAuMrYGVdWNzSOJHSCrsHSbcvo6lrT1583OrBdjD9CT8zbzv2BvIukQU9rcp/lzRnEDbfyVUIWx5oX8Q8ZSTKRHHQow3vjvy4IQh+VLluT39CwWEwQCaqeLlNxuUt+GAcpHeuUWkWUW+UQxu+E8AxSc9MV0CVfXGQDkdy1W3FEiDri2IROpdptxIznT8HJgKPmx7Z7kJ97cPtqeYpXXH9NFX4A9RVwIDAQAB",
   "action": {
     "default_popup": "src/popup/popup.html"
   },

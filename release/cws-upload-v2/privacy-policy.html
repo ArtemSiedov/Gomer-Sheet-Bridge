@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Privacy Policy - Gomer Sheet Bridge</title>
+    <style>
+      :root {
+        --bg: #f6f8fb;
+        --card: #ffffff;
+        --text: #1f2937;
+        --muted: #6b7280;
+        --line: #dbe3ee;
+        --accent: #0e7a46;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      main {
+        max-width: 860px;
+        margin: 32px auto;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 28px 24px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+      h2 {
+        margin-top: 28px;
+        font-size: 20px;
+      }
+      p, li {
+        line-height: 1.6;
+      }
+      .meta {
+        color: var(--muted);
+        margin: 0 0 20px;
+      }
+      .brand {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      ul {
+        margin: 10px 0 0 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Privacy Policy</h1>
+      <p class="meta">Gomer Sheet Bridge • Last updated: 2026-02-09</p>
+
+      <p><span class="brand">Gomer Sheet Bridge</span> does not sell or share personal data with third parties.</p>
+
+      <h2>1. Data Processed by the Extension</h2>
+      <ul>
+        <li>Google Sheets URL entered by the user in the popup.</li>
+        <li>Technical data from Gomer pages for export: category, attribute, parameter value, task number, and product link.</li>
+        <li>Google OAuth access token via Chrome Identity API to write to Google Sheets on behalf of the user.</li>
+      </ul>
+
+      <h2>2. Purpose of Processing</h2>
+      <p>Data is used only for the core function of the extension: exporting data from Gomer to the user's Google Sheets.</p>
+
+      <h2>3. Data Storage</h2>
+      <ul>
+        <li>Settings (for example, the Google Sheet URL) are stored in <code>chrome.storage.sync</code>.</li>
+        <li>The extension does not maintain a separate external user database.</li>
+      </ul>
+
+      <h2>4. Data Sharing</h2>
+      <ul>
+        <li>Data is sent only to Google Sheets API and only as part of user actions.</li>
+        <li>Data is not used for advertising, profiling, or resale.</li>
+      </ul>
+
+      <h2>5. User Control</h2>
+      <ul>
+        <li>Users can remove the extension and clear browser / <code>chrome.storage</code> data.</li>
+        <li>Users can revoke access in Google Account settings.</li>
+      </ul>
+
+      <h2>6. Contact</h2>
+      <p>
+        Extension owner: Artem Siedov<br />
+        Contact email: add your support email before publishing
+      </p>
+    </main>
+  </body>
+</html>

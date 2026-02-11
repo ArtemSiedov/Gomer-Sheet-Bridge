@@ -224,9 +224,6 @@ function extractComparableParamValue(rawValue) {
   const anyValueMatch = src.match(/<value(?:\s+[^>]*)?>([\s\S]*?)<\/value>/i);
   if (anyValueMatch && anyValueMatch[1]) return anyValueMatch[1];
 
-  // Для plain <param>...</param> с CDATA (без <value lang=...>) сохраняем CDATA как есть.
-  if (src.includes("<![CDATA[")) return src;
-
   // plain <param>text</param> fallback
   return src.replace(/<[^>]+>/g, " ");
 }
@@ -897,7 +894,6 @@ const EXPORT_QUEUE_DATA_KEY = "rwExportQueueData";
 const EXPORT_QUEUE_MAX_ITEMS = 200;
 const EXPORT_QUEUE_HISTORY_TTL_MS = 5 * 60 * 60 * 1000; // 5 часов
 const OFFER_IDS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 минут
-const OFFER_IDS_REQUEST_MIN_INTERVAL_MS = 5000;
 let _exportQueue = [];
 let _exportIsProcessing = false;
 let _queueInitialized = false;
@@ -905,8 +901,6 @@ let _queueInitPromise = null;
 let _activeTaskId = "";
 let _activeTaskAbortController = null;
 const _offerIdsCache = new Map();
-let _offerIdsRequestChain = Promise.resolve();
-let _offerIdsLastRequestAt = 0;
 
 function makeTaskId() {
   return `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1027,22 +1021,6 @@ function sendOfferIdsToContentConsole(task, offerIds, url) {
   } catch (_) {}
 }
 
-function sendPaginationToContentConsole(task, payload) {
-  const tabId = Number(task && task.senderTabId);
-  if (!Number.isInteger(tabId)) return;
-  try {
-    chrome.tabs.sendMessage(tabId, {
-      type: "RW_QUEUE_DEBUG_PAGINATION",
-      pageCountHeader: Number(payload && payload.pageCountHeader ? payload.pageCountHeader : 0),
-      totalPages: Number(payload && payload.totalPages ? payload.totalPages : 0),
-      totalRows: Number(payload && payload.totalRows ? payload.totalRows : 0),
-      sourceType: String(payload && payload.sourceType ? payload.sourceType : ""),
-      perPage: Number(payload && payload.perPage ? payload.perPage : 0),
-      url: String(payload && payload.url ? payload.url : "")
-    });
-  } catch (_) {}
-}
-
 async function fetchText(url, taskSignal) {
   const response = await fetch(url, { credentials: "include", signal: taskSignal });
   if (!response.ok) {
@@ -1141,27 +1119,6 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function runWithOfferIdsRateLimit(taskSignal, fn) {
-  const runner = async () => {
-    throwIfTaskAborted(taskSignal);
-    const elapsed = Date.now() - _offerIdsLastRequestAt;
-    const waitMs = OFFER_IDS_REQUEST_MIN_INTERVAL_MS - elapsed;
-    if (waitMs > 0) {
-      await delay(waitMs);
-    }
-    throwIfTaskAborted(taskSignal);
-    _offerIdsLastRequestAt = Date.now();
-    return fn();
-  };
-
-  const resultPromise = _offerIdsRequestChain.then(runner, runner);
-  _offerIdsRequestChain = resultPromise.then(
-    () => undefined,
-    () => undefined
-  );
-  return resultPromise;
-}
-
 function makeOfferIdsCacheKey(task, sourceType, sourceId, categoryId, taskId) {
   const explicit = String(task && task.offerIdsCacheKey ? task.offerIdsCacheKey : "").trim();
   if (explicit) return explicit;
@@ -1245,18 +1202,15 @@ async function collectOfferIdsForTask(task, taskSignal) {
   const allIdsSet = new Set();
   const perPageNum = Number(perPage) || 500;
   const parallelPages = 3;
+  const restoreDelayMs = 500;
   const firstUrl = makeUrl(1);
   logOfferIdsRequest(1, firstUrl);
   throwIfTaskAborted(taskSignal);
-  // Глобальный rate-limit на запросы сбора offerIds (между любыми задачами очереди).
-  let firstMeta;
-  try {
-    firstMeta = await runWithOfferIdsRateLimit(taskSignal, () =>
-      fetchTextWithMeta(firstUrl, taskSignal)
-    );
-  } finally {
-    await restorePageSizeIfNeeded(task, taskSignal);
-  }
+  // После небольшой задержки возвращаем пользовательский size/per-page.
+  const firstFetchPromise = fetchTextWithMeta(firstUrl, taskSignal);
+  await delay(restoreDelayMs);
+  await restorePageSizeIfNeeded(task, taskSignal);
+  const firstMeta = await firstFetchPromise;
   const firstHtml = firstMeta.text;
   const firstIds = parseOfferIdsFromHtml(firstHtml);
   firstIds.forEach((id) => allIdsSet.add(id));
@@ -1280,14 +1234,6 @@ async function collectOfferIdsForTask(task, taskSignal) {
     sourceType
   );
   console.log("[RW][QUEUE] offerIds page 1/", maxPage, "ids=", firstIds.length);
-  sendPaginationToContentConsole(task, {
-    pageCountHeader: maxPageByHeader,
-    totalPages: maxPage,
-    totalRows,
-    sourceType,
-    perPage: firstMeta.perPage || Number(perPage),
-    url: firstUrl
-  });
 
   for (let startPage = 2; startPage <= maxPage; startPage += parallelPages) {
     const endPage = Math.min(maxPage, startPage + parallelPages - 1);
@@ -1302,14 +1248,11 @@ async function collectOfferIdsForTask(task, taskSignal) {
         logOfferIdsRequest(page, pageUrl);
         try {
           throwIfTaskAborted(taskSignal);
-          let html = "";
-          try {
-            html = await runWithOfferIdsRateLimit(taskSignal, () =>
-              fetchText(pageUrl, taskSignal)
-            );
-          } finally {
-            await restorePageSizeIfNeeded(task, taskSignal);
-          }
+          // Не ждем ответа выборки: после небольшой задержки отправляем restore пользовательского размера страницы.
+          const pageFetchPromise = fetchText(pageUrl, taskSignal);
+          await delay(restoreDelayMs);
+          await restorePageSizeIfNeeded(task, taskSignal);
+          const html = await pageFetchPromise;
           const pageIds = parseOfferIdsFromHtml(html);
           return { ok: true, page, pageIds };
         } catch (error) {

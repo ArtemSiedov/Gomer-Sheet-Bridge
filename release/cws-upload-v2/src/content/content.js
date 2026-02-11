@@ -222,7 +222,6 @@ const BINDING_SOURCE_PAGE_KEY = "bindingPageSourceType";
 const SETTINGS_USE_TASK_FILTER_KEY = "useTaskIdForOfferSelection";
 const SETTINGS_CUSTOM_TASK_ID_KEY = "customTaskId";
 const SETTINGS_GENERATE_PRODUCT_LINK_KEY = "generateProductLink";
-const LOCAL_PREFERRED_UI_PAGE_SIZE_KEY = "rwPreferredUiPageSize";
 
 function normalizeTaskId(value) {
   return String(value || "").replace(/[^\d]/g, "").trim();
@@ -279,37 +278,17 @@ function killExportTask(taskId) {
 }
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (!message) return;
-  if (message.type === "RW_QUEUE_DEBUG_OFFER_IDS") {
-    const ids = Array.isArray(message.offerIds) ? message.offerIds : [];
-    console.log(
-      "[RW][OFFER_IDS]",
-      "count=",
-      message.count || ids.length,
-      "url=",
-      message.url || "",
-      "ids=",
-      ids
-    );
-    return;
-  }
-  if (message.type === "RW_QUEUE_DEBUG_PAGINATION") {
-    console.log(
-      "[RW][PAGINATION]",
-      "X-Pagination-Page-Count=",
-      message.pageCountHeader || 0,
-      "totalPages=",
-      message.totalPages || 0,
-      "totalRows=",
-      message.totalRows || 0,
-      "perPage=",
-      message.perPage || 0,
-      "sourceType=",
-      message.sourceType || "",
-      "url=",
-      message.url || ""
-    );
-  }
+  if (!message || message.type !== "RW_QUEUE_DEBUG_OFFER_IDS") return;
+  const ids = Array.isArray(message.offerIds) ? message.offerIds : [];
+  console.log(
+    "[RW][OFFER_IDS]",
+    "count=",
+    message.count || ids.length,
+    "url=",
+    message.url || "",
+    "ids=",
+    ids
+  );
 });
 
 function detectSourceTypeByUrl(url) {
@@ -356,23 +335,33 @@ function getPriceLinkMeta(sourceId) {
 }
 
 function getCurrentUiPageSize() {
-  const strictSelectedOption = document.querySelector("#form_page_size > select > option[selected]");
-  if (strictSelectedOption) {
-    const raw = String(strictSelectedOption.getAttribute("value") || strictSelectedOption.value || strictSelectedOption.textContent || "").trim();
+  const sizeSelectors = [
+    'select[name="per-page"]',
+    'select[name="size"]',
+    'input[name="per-page"]',
+    'input[name="size"]',
+    '#sync-sources-container select[name="per-page"]',
+    '#sync-sources-container input[name="per-page"]'
+  ];
+  for (const sel of sizeSelectors) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    const raw = (el.value || el.getAttribute("value") || "").trim();
     if (/^\d+$/.test(raw)) return raw;
   }
-
-  const pageSizeSelect = document.querySelector("#form_page_size > select");
-  if (pageSizeSelect) {
-    const raw = String(pageSizeSelect.value || "").trim();
-    if (/^\d+$/.test(raw)) return raw;
+  try {
+    const u = new URL(window.location.href);
+    const size =
+      (u.searchParams.get("size") || "").trim() ||
+      (u.searchParams.get("per-page") || "").trim();
+    return /^\d+$/.test(size) ? size : "";
+  } catch (_) {
+    return "";
   }
-
-  return "20";
 }
 
-function buildRestorePageSizeUrl(sourceId, sourceType, categoryIdForOnModeration, taskIdForOfferSelection, sizeOverride = "") {
-  const size = String(sizeOverride || getCurrentUiPageSize() || "").trim();
+function buildRestorePageSizeUrl(sourceId, sourceType, categoryIdForOnModeration, taskIdForOfferSelection) {
+  const size = getCurrentUiPageSize();
   const p = new URLSearchParams();
   if (size) {
     if (sourceType === "active" || sourceType === "changes") {
@@ -389,36 +378,6 @@ function buildRestorePageSizeUrl(sourceId, sourceType, categoryIdForOnModeration
         ? `${window.location.origin}/gomer/items/changes/source/${sourceId}`
         : `${window.location.origin}/gomer/items/source/${sourceId}`;
   return `${base}?${p.toString()}`;
-}
-
-function persistPreferredUiPageSize() {
-  const size = getCurrentUiPageSize();
-  if (!size) return;
-  try {
-    chrome.storage.local.set({ [LOCAL_PREFERRED_UI_PAGE_SIZE_KEY]: size });
-  } catch (_) {}
-}
-
-async function resolvePreferredUiPageSize() {
-  const current = getCurrentUiPageSize();
-  if (current) {
-    try {
-      chrome.storage.local.set({ [LOCAL_PREFERRED_UI_PAGE_SIZE_KEY]: current });
-    } catch (_) {}
-    return current;
-  }
-  return await new Promise((resolve) => {
-    try {
-      chrome.storage.local.get([LOCAL_PREFERRED_UI_PAGE_SIZE_KEY], (data) => {
-        const v = data && data[LOCAL_PREFERRED_UI_PAGE_SIZE_KEY]
-          ? String(data[LOCAL_PREFERRED_UI_PAGE_SIZE_KEY]).trim()
-          : "";
-        resolve(/^\d+$/.test(v) ? v : "");
-      });
-    } catch (_) {
-      resolve("");
-    }
-  });
 }
 
 function initQueuePanel() {
@@ -1430,7 +1389,6 @@ function createBlockButton(row) {
         }
         const { priceUrl, priceLinkTitle } = getPriceLinkMeta(sourceId);
         const sourceType = await resolveSourceTypeForQueue();
-        const preferredSize = await resolvePreferredUiPageSize();
         const categoryIdForPrice = isItemDetails ? getCategoryIdForPriceFromItemDetails() : "";
 
         const fields = {
@@ -1455,7 +1413,7 @@ function createBlockButton(row) {
           valueForPrice,
           priceUrl,
           priceLinkTitle,
-          restorePageSizeUrl: buildRestorePageSizeUrl(sourceId, sourceType, categoryId || "", taskIdForOfferSelection, preferredSize),
+          restorePageSizeUrl: buildRestorePageSizeUrl(sourceId, sourceType, categoryId || "", taskIdForOfferSelection),
           fields
         });
         showToast("Задача добавлена в очередь", btn, "success", 1700);
@@ -1494,11 +1452,6 @@ function extractBindingValueFromRow(row) {
   const strictValue = extractRuValue(strictRaw);
   if (String(strictValue || "").trim()) return String(strictValue).trim();
 
-  const midEl = td.querySelector("div");
-  const midRaw = midEl ? (midEl.value || midEl.textContent || midEl.getAttribute("value") || "") : "";
-  const midValue = extractRuValue(midRaw);
-  if (String(midValue || "").trim()) return String(midValue).trim();
-
   const tdTextRaw = td.innerText || td.textContent || "";
   const tdText = String(tdTextRaw || "")
     .split("\n")
@@ -1509,11 +1462,14 @@ function extractBindingValueFromRow(row) {
 }
 
 function getBindingSelectedRows() {
-  return Array.from(
-    document.querySelectorAll(
-      "#gomer-app > div > div.p-datatable.p-component.p-datatable-responsive-scroll.p-datatable-gridlines > div.p-datatable-wrapper > table > tbody > tr.p-highlight"
-    )
+  const tbody = document.querySelector(
+    "#gomer-app > div > div.p-datatable.p-component.p-datatable-responsive-scroll.p-datatable-gridlines > div.p-datatable-wrapper > table > tbody"
   );
+  if (!tbody) return [];
+  const rows = Array.from(tbody.querySelectorAll("tr"));
+  const checkedRows = rows.filter((row) => Boolean(row.querySelector('input[type="checkbox"]:checked')));
+  if (checkedRows.length) return checkedRows;
+  return rows.filter((row) => row.classList.contains("p-highlight"));
 }
 
 function getBindingSelectedValues(fallbackValue) {
@@ -1649,7 +1605,6 @@ function createTableButton(cell) {
         }
         const { priceUrl, priceLinkTitle } = getPriceLinkMeta(sourceId);
         const sourceType = await resolveSourceTypeForQueue();
-        const preferredSize = await resolvePreferredUiPageSize();
         const offerIdsCacheKey = `${sourceType}|${sourceId}|${finalCategoryId || ""}|${taskIdForOfferSelection || ""}`;
         let enqueuedCount = 0;
         let enqueueErrors = 0;
@@ -1682,7 +1637,7 @@ function createTableButton(cell) {
               priceUrl,
               priceLinkTitle,
               offerIdsCacheKey,
-              restorePageSizeUrl: buildRestorePageSizeUrl(sourceId, sourceType, finalCategoryId || "", taskIdForOfferSelection, preferredSize),
+              restorePageSizeUrl: buildRestorePageSizeUrl(sourceId, sourceType, finalCategoryId || "", taskIdForOfferSelection),
               fields
             });
             enqueuedCount += 1;
@@ -1797,7 +1752,6 @@ function observePagination() {
 }
 
 function initButtons() {
-  persistPreferredUiPageSize();
   initQueuePanel();
   addButtonsToBlocks();
   observePagination();
